@@ -280,28 +280,26 @@ function createWindow () {
 let cursorTimer = null
 
 /**
- * 可交互期间主动轮询真实光标位置。
+ * 全程轮询真实光标位置，喂给渲染进程。
  *
- * 踩过的坑：setIgnoreMouseEvents(true, {forward:true}) 会转发 mousemove，
- * 但一旦切成 false（可交互），Electron 就不再转发了 —— 渲染进程再也收不到
- * mousemove，pointer 会**冻在进入时的位置**，于是它永远发现不了你已经离开面板，
- * 窗口就卡在「可交互」状态，后续点击全落在错误的地方。
- *
- * screen.getCursorScreenPoint() 不受这个限制，用 60ms 轮询补上。
+ * 为什么不只靠 mousemove：`setIgnoreMouseEvents(true, { forward: true })` 的转发
+ * 实测**极不可靠** —— 一次会话里总共只收到过 1 个 mousemove。后果有两个：
+ *   1. 切成「可交互」后转发彻底停止，指针坐标冻在进入那一刻，
+ *      渲染进程再也发现不了你已经离开面板（窗口会卡在可交互状态）
+ *   2. 视线跟随拿不到新坐标 —— 眼睛就不跟鼠标了
+ * 所以干脆全程 50ms 轮询兜底，mousemove 只算锦上添花。
+ * `screen.getCursorScreenPoint()` 不受窗口状态影响，返回的也是 DIP（= CSS px）。
  */
 function startCursorPoll () {
   if (cursorTimer || !win || win.isDestroyed()) return
   cursorTimer = setInterval(() => {
-    if (!win || win.isDestroyed() || !interactive) return
+    if (!win || win.isDestroyed()) return
     try {
       const p = screen.getCursorScreenPoint()
       win.webContents.send('pet:cursor', { x: p.x, y: p.y })
     } catch { /* ignore */ }
-  }, 60)
-}
-
-function stopCursorPoll () {
-  if (cursorTimer) { clearInterval(cursorTimer); cursorTimer = null }
+  }, 50)
+  log('光标轮询已启动（50ms）')
 }
 
 function setInteractive (on) {
@@ -315,9 +313,6 @@ function setInteractive (on) {
   } catch (e) {
     log('切换鼠标穿透失败:', e.message)
   }
-  // 可交互时 mousemove 不再转发，改用轮询喂坐标；不可交互时恢复转发
-  if (interactive) startCursorPoll()
-  else stopCursorPoll()
 }
 function hardResetInteraction () {
   interactive = false
@@ -1270,6 +1265,7 @@ if (!app.requestSingleInstanceLock()) {
     loadChat()
     startHotkeys()
     startGameLoop()
+    startCursorPoll()
 
     screen.on('display-metrics-changed', () => {
       if (!win || win.isDestroyed()) return

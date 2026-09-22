@@ -457,6 +457,36 @@ Electron 文档只说 `forward` 在 `ignore: true` 时生效 —— 反过来说
 
 另外加了个动作看门狗：超过预计时长还没回待机，就强制收尾，免得又卡死。
 
+**7. 视线跟随：别用库自带的 `model.focus()`**
+
+库的实现是「把光标换算到模型局部坐标 → 归一化 → `atan2` 求方向 → 喂一个**单位向量**
+给 focusController」。单位向量模长恒为 1，而 `updateFocus()` 里是
+`addParameterValueById(ParamAngleX, 30 * controller.x)` —— 所以**永远是满偏转**：
+眼睛只会贴在左边或右边，看着像没在跟随。
+
+这里改成直接驱动 `focusController`，按「光标相对模型中心的偏移量」做**比例**控制。
+实测（`petX` 约 1850）：
+
+| 光标 x | ParamAngleX | ParamEyeBallX |
+| --- | --- | --- |
+| 240（远左） | −30.0 | −1.00 |
+| 1337 | −24.5 | −1.00 |
+| 1840（正中心） | **−0.3** | **−0.20** |
+| 2000 | **+8.1** | **+0.30** |
+
+纵向同理：光标在她上方 `AngleY=+30`，下方 `AngleY=−30`。
+
+**8. 还有一个更隐蔽的：归位不能清「受保护参数」**
+
+视线跟随的结果是写进 `ParamAngleX/Y/Z`、`ParamEyeBallX/Y`、`ParamBodyAngleX` 的，
+眨眼写 `ParamEyeLOpen/ROpen`，呼吸写 `ParamBreath`。
+而 `自拍` / `番茄酱` / `重锤出击` 这些动作**也驱动 `ParamAngleX/Y/Z`** ——
+于是它们会被那份「动作留下的参数」名单收进去，归位后每帧强制写 0，
+**正好把视线跟随和眨眼的输出覆盖掉**：眼睛不跟鼠标了、也不眨眼了。
+
+所以 `clearMotionParams` 里有一道 `PROTECTED_PARAMS` 白名单。归位时保护的参数
+从 58 个降到 46 个，视线和眨眼都不受影响。
+
 ---
 
 ## 九、常见问题

@@ -70,6 +70,25 @@
   let idleParams = new Set()      // Idle 驱动的参数：这些不能强清，否则待机被冻住
   let pendingProbe = null         // 归位后下一帧在帧内抽查一次参数值
 
+  /**
+   * 这些参数由库自己每帧驱动，**绝对不能进 clearedParams**。
+   *
+   * 踩过的坑：视线跟随（updateFocus）是把结果 addParameterValueById 到
+   * ParamAngleX/Y/Z、ParamEyeBallX/Y、ParamBodyAngleX 上的；眨眼写
+   * ParamEyeLOpen/ROpen；呼吸写 ParamBreath。而 自拍 / 番茄酱 / 重锤出击
+   * 这些动作**也驱动 ParamAngleX/Y/Z** —— 于是一按归位，它们就被塞进
+   * clearedParams 每帧强制写 0，正好把视线跟随和眨眼的输出覆盖掉：
+   * 眼睛不跟鼠标了、也不眨眼了。
+   */
+  const PROTECTED_PARAMS = new Set([
+    'ParamAngleX', 'ParamAngleY', 'ParamAngleZ',
+    'ParamEyeBallX', 'ParamEyeBallY',
+    'ParamBodyAngleX', 'ParamBodyAngleY', 'ParamBodyAngleZ',
+    'ParamEyeLOpen', 'ParamEyeROpen',
+    'ParamBreath',
+    'ParamMouthOpenY', 'ParamMouthForm',
+  ])
+
   let dragging = false
   let dragMoved = 0
   let dragOffset = { x: 0, y: 0 }
@@ -287,7 +306,8 @@
     if (!ids || !ids.length) return 0
     let n = 0
     for (const id of ids) {
-      if (idleParams.has(id)) continue
+      if (idleParams.has(id)) continue          // Idle 会驱动，别去打架
+      if (PROTECTED_PARAMS.has(id)) continue    // 视线/眨眼/呼吸，清了就瞎了
       if (!defaultParams.has(id)) continue
       if (clearedParams.has(id)) continue
       clearedParams.add(id)
@@ -395,6 +415,39 @@
   }
 
   /* ============================================================ *
+   * 视线跟随
+   * ============================================================ */
+
+  /**
+   * 别用库自带的 `model.focus(x, y)`。
+   *
+   * 它的实现是：把光标换算到模型局部坐标 → 归一化 → `atan2` 求出**方向** →
+   * 喂一个单位向量 `(cos a, -sin a)` 给 focusController。
+   * 单位向量的模长恒为 1，而 updateFocus() 里是
+   * `addParameterValueById(ParamAngleX, 30 * controller.x)` ——
+   * 于是**永远是满偏转**：眼睛只会贴在左边或右边，看着像没在跟随。
+   *
+   * 这里直接驱动 focusController，按「光标相对模型中心的偏移量」做比例控制，
+   * 得到 -1..1 的连续值，才是真正的「眼睛跟着鼠标转」。
+   */
+  function updateGaze () {
+    if (!model) return
+    const fc = model.internalModel && model.internalModel.focusController
+    if (!fc) return
+
+    const cx = petX
+    const cy = petY - petHeight * 0.5          // 视觉中心大约在锚点上方半个身位
+    const rangeX = Math.max(140, petHeight * 0.9)
+    const rangeY = Math.max(110, petHeight * 0.7)
+
+    const nx = clamp((pointer.x - cx) / rangeX, -1, 1)
+    const ny = clamp((cy - pointer.y) / rangeY, -1, 1)   // 屏幕 y 轴向下，取反
+
+    // focusController 自带速度平滑，不需要我们再做插值
+    fc.focus(nx, ny)
+  }
+
+  /* ============================================================ *
    * 主循环
    * ============================================================ */
   function startTicker () {
@@ -405,7 +458,7 @@
 
       // 视线跟随
       if (!dragging && model) {
-        model.focus(pointer.x, pointer.y)
+        updateGaze()
       }
 
       tickExpressionStack(dt)
