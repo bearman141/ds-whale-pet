@@ -24,6 +24,19 @@ contextBridge.exposeInMainWorld('petAPI', {
   onEvents: (fn) => ipcRenderer.on('pet:events', (_e, ev) => fn(ev)),
   onPanel: (fn) => ipcRenderer.on('pet:panel', (_e, p) => fn(p)),
 
+  /* ---- 聊天 ---- */
+  chatInit: () => ipcRenderer.invoke('pet:chat-init'),
+  chatSend: (text) => ipcRenderer.invoke('pet:chat-send', String(text == null ? '' : text)),
+  chatSaveConfig: (patch) => ipcRenderer.invoke('pet:chat-save-config', patch),
+  chatTest: () => ipcRenderer.invoke('pet:chat-test'),
+  chatClear: () => ipcRenderer.send('pet:chat-clear'),
+  onChatPanel: (fn) => ipcRenderer.on('pet:chatpanel', (_e, p) => fn(p)),
+  onChatMessage: (fn) => ipcRenderer.on('pet:chat-message', (_e, m) => fn(m)),
+  onChatDelta: (fn) => ipcRenderer.on('pet:chat-delta', (_e, p) => fn(p)),
+  onChatReply: (fn) => ipcRenderer.on('pet:chat-reply', (_e, p) => fn(p)),
+  onChatThinking: (fn) => ipcRenderer.on('pet:chat-thinking', (_e, p) => fn(p)),
+  onChatCleared: (fn) => ipcRenderer.on('pet:chat-cleared', (_e, p) => fn(p)),
+
   onAction: (fn) => ipcRenderer.on('pet:action', (_e, a) => fn(a)),
   onSize: (fn) => ipcRenderer.on('pet:size', (_e, h) => fn(h)),
   onPosition: (fn) => ipcRenderer.on('pet:position', (_e, p) => fn(p)),

@@ -18,6 +18,10 @@ const fs = require('fs')
 const { pathToFileURL } = require('url')
 const { buildCatalog } = require('./catalog')
 const { Game, STAT_META, STAT_KEYS, titleFor, ACTIONS } = require('./game')
+const {
+  normalizeConfig, configReady, maskKey, buildSystemPrompt, parseReply,
+  requestChat, buildMessages, CHAT_EMOTION_POOL, CHAT_MOTION_POOL,
+} = require('./chat')
 
 /* ================================================================== *
  * 基础路径 / 日志
@@ -30,6 +34,8 @@ const ASSET_ICON = path.join(APP_DIR, 'assets', 'icon.png')
 app.setPath('userData', path.join(app.getPath('appData'), 'DSWhalePet'))
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json')
 const STATE_FILE = path.join(app.getPath('userData'), 'pet-state.json')
+const CHAT_FILE = path.join(app.getPath('userData'), 'chat.json')
+const HISTORY_FILE = path.join(app.getPath('userData'), 'chat-history.json')
 const LOG_FILE = path.join(app.getPath('userData'), 'pet.log')
 
 fs.mkdirSync(app.getPath('userData'), { recursive: true })
@@ -237,6 +243,17 @@ function createWindow () {
   // 页面就绪后补推一次养成快照（启动时的那次 tick 早于渲染进程订阅）
   win.webContents.on('did-finish-load', () => {
     setTimeout(() => { sendGame() }, 400)
+
+    // 调试：DSHPET_CHAT_PROBE="你好" 时自动发一条，用来验证聊天链路
+    if (process.env.DSHPET_CHAT_PROBE) {
+      setTimeout(() => {
+        log('聊天自检：发送 ->', process.env.DSHPET_CHAT_PROBE)
+        chatSend(process.env.DSHPET_CHAT_PROBE).then(
+          (r) => log('聊天自检：结果 ->', JSON.stringify(r)),
+          (e) => log('聊天自检：异常 ->', e && e.message),
+        )
+      }, 3500)
+    }
   })
   win.webContents.on('render-process-gone', (_e, details) => {
     log('渲染进程崩溃:', details)
@@ -523,9 +540,13 @@ function startGameLoop () {
 function gameAct (name) {
   if (!game) return { ok: false, reason: '养成系统还没就绪' }
 
-  // panel 不是互动，只是开关面板
+  // 这两个不是互动，只是开面板
   if (name === 'panel') {
     win?.webContents.send('pet:panel', { toggle: true })
+    return { ok: true }
+  }
+  if (name === 'chat') {
+    win?.webContents.send('pet:chatpanel', { toggle: true })
     return { ok: true }
   }
 
@@ -535,6 +556,164 @@ function gameAct (name) {
   saveGame(true)
   sendGame()
   return res
+}
+
+/* ================================================================== *
+ * 聊天（OpenAI 兼容接口）
+ *
+ * 关键点：
+ *  - 提示词里会塞进她当前的养成状态，所以同样一句话，
+ *    饿的时候和吃饱的时候口气不一样
+ *  - 让她在回复开头带 [表情:xxx][动作:xxx]，解析出来后
+ *    直接喂给渲染进程的分层表情栈 —— 聊天内容能驱动表情和动作
+ *  - 走 Electron 的 net.fetch 而不是 Node 的 fetch，
+ *    因为 net.fetch 会吃系统代理设置（这台机器上 GitHub/OpenAI 都得走代理）
+ * ================================================================== */
+let chatConfig = null
+let chatHistory = []
+let chatBusy = false
+
+function loadChat () {
+  try {
+    chatConfig = normalizeConfig(JSON.parse(fs.readFileSync(CHAT_FILE, 'utf8')))
+  } catch (e) {
+    chatConfig = normalizeConfig(null)
+    if (e.code !== 'ENOENT') log('聊天配置损坏，已重置：', e.message)
+  }
+  try {
+    const h = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'))
+    chatHistory = Array.isArray(h) ? h.filter((m) => m && m.role && m.content) : []
+  } catch {
+    chatHistory = []
+  }
+  log('聊天配置：', configReady(chatConfig)
+    ? `${chatConfig.model} @ ${chatConfig.baseUrl}${chatConfig.apiKey ? '（已配置密钥）' : '（无密钥）'}`
+    : '未启用', `| 历史 ${chatHistory.length} 条`)
+}
+
+function saveChatConfig () {
+  try { fs.writeFileSync(CHAT_FILE, JSON.stringify(chatConfig, null, 2)) } catch (e) { log('保存聊天配置失败:', e.message) }
+}
+
+function saveChatHistory () {
+  try {
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(chatHistory.slice(-120)))
+  } catch (e) { log('保存聊天记录失败:', e.message) }
+}
+
+/** 给渲染进程看的配置：密钥只回掩码，绝不回明文 */
+function chatPublicConfig () {
+  return {
+    enabled: chatConfig.enabled,
+    baseUrl: chatConfig.baseUrl,
+    model: chatConfig.model,
+    temperature: chatConfig.temperature,
+    maxTokens: chatConfig.maxTokens,
+    stream: chatConfig.stream,
+    historyLimit: chatConfig.historyLimit,
+    systemExtra: chatConfig.systemExtra,
+    hasKey: !!chatConfig.apiKey,
+    keyMask: maskKey(chatConfig.apiKey),
+    ready: configReady(chatConfig),
+  }
+}
+
+function chatSaveConfig (patch) {
+  const next = { ...chatConfig }
+  if (patch && typeof patch === 'object') {
+    for (const k of ['enabled', 'baseUrl', 'model', 'temperature', 'maxTokens', 'stream', 'historyLimit', 'systemExtra']) {
+      if (patch[k] !== undefined) next[k] = patch[k]
+    }
+    // 密钥只在明确传了新值时才覆盖；clearKey 表示清空
+    if (typeof patch.apiKey === 'string' && patch.apiKey.trim()) next.apiKey = patch.apiKey.trim()
+    if (patch.clearKey) next.apiKey = ''
+  }
+  chatConfig = normalizeConfig(next)
+  saveChatConfig()
+  log('聊天配置已更新:', chatConfig.baseUrl, '|', chatConfig.model, chatConfig.apiKey ? '| 有密钥' : '| 无密钥')
+  return chatPublicConfig()
+}
+
+const chatTo = (channel, payload) => {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
+}
+
+async function chatSend (text) {
+  const say = String(text == null ? '' : text).trim().slice(0, 2000)
+  if (!say) return { ok: false, error: '消息是空的' }
+  if (chatBusy) return { ok: false, error: '她还在想上一条呢' }
+
+  if (!configReady(chatConfig)) {
+    chatTo('pet:chat-reply', { ok: false, needSetup: true, error: '还没配置聊天接口' })
+    return { ok: false, error: '未配置' }
+  }
+
+  chatBusy = true
+  chatTo('pet:chat-thinking', { on: true })
+
+  // 先记下用户这句，界面上立刻显示
+  chatHistory.push({ role: 'user', content: say })
+  saveChatHistory()
+  chatTo('pet:chat-message', { role: 'user', content: say })
+
+  // 思考中的小表现
+  dispatchEvents([
+    { type: 'expression', target: '呆呆眼', ttl: 4000, layer: 'event' },
+  ])
+
+  try {
+    const snap = game ? game.snapshot() : null
+    const allowed = (pool, have) => pool.filter((n) => !have || have.has(n))
+    const emotions = allowed(CHAT_EMOTION_POOL, catalog.expressionNames)
+    const motions = allowed(CHAT_MOTION_POOL, catalog.motionNames)
+
+    const system = buildSystemPrompt(snap, { emotions, motions, extra: chatConfig.systemExtra })
+    const messages = buildMessages(system, chatHistory.slice(0, -1), say, chatConfig.historyLimit)
+
+    const raw = await requestChat(chatConfig, messages, {
+      fetchImpl: (url, opts) => net.fetch(url, opts),
+      onDelta: (full) => chatTo('pet:chat-delta', { text: full }),
+    })
+
+    const parsed = parseReply(raw)
+    chatHistory.push({ role: 'assistant', content: parsed.text })
+    if (chatHistory.length > 200) chatHistory = chatHistory.slice(-200)
+    saveChatHistory()
+
+    // 聊天也算陪伴：涨好感 / 心情 / 经验
+    const res = game ? game.noteChat() : null
+    if (res && res.events.length) dispatchEvents(res.events)
+    if (res) { saveGame(true); sendGame() }
+
+    // 她的回复反过来驱动表情和动作
+    const evs = []
+    if (parsed.emotion && (!catalog.expressionNames || catalog.expressionNames.has(parsed.emotion))) {
+      evs.push({ type: 'expression', target: parsed.emotion, ttl: 9000, layer: 'event' })
+    }
+    if (parsed.motion && (!catalog.motionNames || catalog.motionNames.has(parsed.motion))) {
+      evs.push({ type: 'motion', target: parsed.motion, label: parsed.motion })
+    }
+    if (parsed.text && parsed.text.length <= 70) {
+      evs.push({ type: 'bubble', text: parsed.text, ms: 3600 })
+    }
+    if (evs.length) dispatchEvents(evs)
+
+    log('聊天回复:', parsed.emotion ? `[${parsed.emotion}]` : '', parsed.text.slice(0, 60))
+    chatTo('pet:chat-reply', { ok: true, text: parsed.text, emotion: parsed.emotion, motion: parsed.motion })
+    return { ok: true }
+  } catch (e) {
+    const msg = String((e && e.message) || e)
+    log('聊天失败:', msg)
+    dispatchEvents([
+      { type: 'bubble', text: '呜……我脑子卡住了' },
+      { type: 'expression', target: '晕晕', ttl: 5000, layer: 'event' },
+    ])
+    chatTo('pet:chat-reply', { ok: false, error: msg })
+    return { ok: false, error: msg }
+  } finally {
+    chatBusy = false
+    chatTo('pet:chat-thinking', { on: false })
+  }
 }
 
 /* ================================================================== *
@@ -614,6 +793,7 @@ function makeMenuTemplate (extra = []) {
     ...extra,
     { type: 'separator' },
     { label: '🐋 照顾她', submenu: careItems },
+    { label: '💬 和她聊天', click: () => win?.webContents.send('pet:chatpanel', { toggle: true }) },
     {
       label: '📊 状态面板',
       click: () => win?.webContents.send('pet:panel', { toggle: true }),
@@ -853,6 +1033,44 @@ function setupIpc () {
     log('已重新领养')
   })
 
+  /* ---- 聊天 ---- */
+  ipcMain.handle('pet:chat-init', () => ({
+    config: chatPublicConfig(),
+    history: chatHistory.slice(-40),
+    busy: chatBusy,
+  }))
+
+  ipcMain.handle('pet:chat-send', (_e, text) => chatSend(text))
+
+  ipcMain.handle('pet:chat-save-config', (_e, patch) => chatSaveConfig(patch))
+
+  ipcMain.handle('pet:chat-test', async () => {
+    if (!configReady(chatConfig)) return { ok: false, error: '请先填写接口地址和模型名' }
+    const wasStream = chatConfig.stream
+    try {
+      // 测试连通性时强制非流式，拿完整响应好判断
+      const probe = { ...chatConfig, stream: false, maxTokens: 64 }
+      const raw = await requestChat(probe, [
+        { role: 'system', content: '你只能用一句话回答。' },
+        { role: 'user', content: '在吗？' },
+      ], { fetchImpl: (url, opts) => net.fetch(url, opts) })
+      log('聊天连通性测试成功:', String(raw).slice(0, 80))
+      return { ok: true, sample: String(raw).slice(0, 200) }
+    } catch (e) {
+      log('聊天连通性测试失败:', e.message)
+      return { ok: false, error: String((e && e.message) || e) }
+    } finally {
+      chatConfig.stream = wasStream
+    }
+  })
+
+  ipcMain.on('pet:chat-clear', () => {
+    chatHistory = []
+    saveChatHistory()
+    chatTo('pet:chat-cleared', {})
+    log('聊天记录已清空')
+  })
+
   ipcMain.handle('pet:init', () => {
     // 首次运行提示只显示一次
     const firstRun = !!settings.showHint
@@ -898,6 +1116,8 @@ if (!app.requestSingleInstanceLock()) {
     }
 
     catalog = buildCatalog(MODEL_DIR)
+    catalog.expressionNames = new Set(catalog.expressions.map((e) => e.name))
+    catalog.motionNames = new Set(catalog.motions.map((m) => m.name))
     log(`目录：表情 ${catalog.expressions.length} 个，动作 ${catalog.motions.length} 个，热键 ${catalog.hotkeys.length} 条`)
 
     setupIpc()
@@ -914,6 +1134,7 @@ if (!app.requestSingleInstanceLock()) {
       log('创建托盘失败:', e.message)
     }
 
+    loadChat()
     startHotkeys()
     startGameLoop()
 

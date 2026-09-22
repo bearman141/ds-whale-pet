@@ -152,6 +152,7 @@ const HOTKEY_TABLE = [
   { combo: 'Ctrl+Alt+G', kind: 'action', target: 'gift', label: '🎁 送礼物' },
   { combo: 'Ctrl+Alt+S', kind: 'action', target: 'sleep', label: '💤 睡觉 / 叫醒' },
   { combo: 'Ctrl+Alt+T', kind: 'action', target: 'panel', label: '📊 状态面板' },
+  { combo: 'Ctrl+Alt+L', kind: 'action', target: 'chat', label: '💬 和她聊天' },
 ]
 
 /* ------------------------------------------------------------------ *

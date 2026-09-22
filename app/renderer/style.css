@@ -24,20 +24,22 @@ html, body {
   position: fixed;
   left: 0;
   top: 0;
-  padding: 5px 12px;
+  padding: 6px 12px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.94);
+  background: rgba(255, 255, 255, 0.95);
   color: #23405c;
   font-size: 13px;
-  line-height: 1.34;
-  white-space: nowrap;
+  line-height: 1.4;
+  max-width: 300px;
+  text-align: center;
+  white-space: pre-wrap;
+  word-break: break-word;
   box-shadow: 0 3px 12px rgba(10, 40, 70, 0.28);
   border: 1px solid rgba(120, 190, 235, 0.85);
   transform: translate(-50%, -100%);
   pointer-events: none;
   transition: opacity 0.22s ease, transform 0.22s ease;
   will-change: transform, opacity;
-  max-width: 340px;
 }
 
 #bubble::after {
@@ -48,7 +50,7 @@ html, body {
   margin-left: -7px;
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
-  border-top: 8px solid rgba(255, 255, 255, 0.94);
+  border-top: 8px solid rgba(255, 255, 255, 0.95);
   filter: drop-shadow(0 1px 0 rgba(120, 190, 235, 0.85));
 }
 
@@ -73,19 +75,28 @@ html, body {
   transform: translate(-50%, -100%);
   pointer-events: none;
   transition: opacity 0.3s ease;
-  max-width: 420px;
+  max-width: 440px;
 }
 
 #hint b { font-size: 14px; color: #1b6fa8; }
 #hint .dim { color: #7d8f9e; font-size: 11.5px; }
 #hint.hidden { opacity: 0; }
 
-/* ================= 状态面板 ================= */
-#panel {
+/* ================= 面板区 =================
+   两个面板放在同一个 flex 容器里，整体贴着宠物左边；
+   坐标只在一个地方算（pet.js 的 layoutPanels）。 */
+#panels {
   position: fixed;
   left: 0;
   top: 0;
-  width: 296px;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  pointer-events: none;          /* 容器本身不挡鼠标，卡片自己开 */
+}
+
+.card {
+  pointer-events: auto;
   box-sizing: border-box;
   padding: 12px 13px 10px;
   border-radius: 16px;
@@ -95,23 +106,31 @@ html, body {
   color: #22374d;
   font-size: 12.5px;
   line-height: 1.45;
-  opacity: 1;
-  transition: opacity 0.18s ease, transform 0.18s ease;
-  transform-origin: bottom right;
 }
 
-#panel.hidden {
-  opacity: 0;
-  transform: scale(0.96);
-  pointer-events: none;
-}
+.card.hidden { display: none; }
 
-/* ---- 头部 ---- */
+#panel { width: 296px; }
+#chat { width: 330px; }
+
+/* ================= 通用头部 ================= */
 .p-head { display: flex; align-items: center; gap: 8px; }
 .p-emoji { font-size: 22px; line-height: 1; }
-
 .p-title { flex: 1; min-width: 0; }
+.p-sub { font-size: 11px; color: #7d8f9e; }
 
+#p-close, #c-close {
+  border: none;
+  background: transparent;
+  color: #9fb3c2;
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+#p-close:hover, #c-close:hover { color: #e2607f; }
+
+/* ================= 状态面板 ================= */
 #p-name {
   width: 100%;
   border: none;
@@ -127,20 +146,6 @@ html, body {
 #p-name:hover { border-bottom-color: rgba(120, 190, 235, 0.9); }
 #p-name:focus { border-bottom-color: #1b6fa8; background: rgba(120, 190, 235, 0.12); }
 
-.p-sub { font-size: 11px; color: #7d8f9e; }
-
-#p-close {
-  border: none;
-  background: transparent;
-  color: #9fb3c2;
-  font-size: 19px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 2px;
-}
-#p-close:hover { color: #e2607f; }
-
-/* ---- 当前情绪 ---- */
 .p-moodrow {
   margin-top: 9px;
   padding: 7px 9px;
@@ -151,7 +156,6 @@ html, body {
 .p-mood { font-size: 13px; font-weight: 700; color: #1b6fa8; }
 .p-reason { font-size: 11px; color: #6f8496; margin-top: 1px; }
 
-/* ---- 属性条 ---- */
 .p-bars { margin-top: 9px; display: flex; flex-direction: column; gap: 6px; }
 
 .p-line {
@@ -181,7 +185,6 @@ html, body {
 
 .p-sep { height: 1px; background: rgba(140, 170, 190, 0.25); margin: 10px 0 8px; }
 
-/* ---- 互动按钮 ---- */
 .p-actions {
   margin-top: 10px;
   display: grid;
@@ -207,7 +210,6 @@ html, body {
 .p-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
 .p-actions button .ico { font-size: 14px; display: block; line-height: 1.15; }
 
-/* ---- 事件流 ---- */
 .p-logtitle {
   margin: 11px 0 4px;
   font-size: 11px;
@@ -229,7 +231,6 @@ html, body {
 .p-log li { padding: 1.5px 0; display: flex; gap: 5px; }
 .p-log li .t { color: #a8b8c4; flex: none; }
 
-/* ---- 底部 ---- */
 .p-foot {
   margin-top: 9px;
   padding-top: 7px;
@@ -252,3 +253,171 @@ html, body {
   cursor: pointer;
 }
 #p-reset:hover { background: rgba(226, 96, 127, 0.12); }
+
+/* ================= 聊天面板 ================= */
+.c-title { font-size: 14px; font-weight: 700; color: #17405f; }
+
+#c-main.hidden, .c-thinking.hidden, #c-setup.hidden { display: none; }
+
+/* ---- 首次配置 ---- */
+#c-setup { display: flex; flex-direction: column; gap: 7px; margin-top: 9px; }
+
+.c-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: #55707f;
+}
+
+.c-field input,
+.c-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(120, 190, 235, 0.7);
+  border-radius: 7px;
+  padding: 4px 7px;
+  font: inherit;
+  font-size: 11.5px;
+  color: #22374d;
+  background: #fff;
+  outline: none;
+  resize: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.c-field input:focus,
+.c-field textarea:focus { border-color: #1b6fa8; box-shadow: 0 0 0 2px rgba(120, 190, 235, 0.3); }
+
+.c-row { display: flex; gap: 6px; }
+
+.c-row button,
+.c-foot button {
+  flex: 1;
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(120, 190, 235, 0.75);
+  background: rgba(120, 190, 235, 0.13);
+  color: #1d5c86;
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+.c-row button.primary { background: #4aa8dd; border-color: #4aa8dd; color: #fff; }
+.c-row button:hover, .c-foot button:hover { filter: brightness(0.95); }
+.c-row button:disabled, .c-foot button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.c-msg { font-size: 11px; min-height: 15px; color: #6f8496; word-break: break-word; }
+.c-msg.err { color: #d9534f; }
+.c-msg.ok { color: #2e8b57; }
+
+.c-dim { color: #93a7b5; font-size: 10.5px; font-weight: 400; }
+.c-tip { line-height: 1.5; margin-top: 2px; }
+.c-tip code { background: rgba(140, 170, 190, 0.18); padding: 0 3px; border-radius: 3px; }
+
+/* ---- 对话 ---- */
+#c-main { display: flex; flex-direction: column; margin-top: 9px; }
+
+.c-msgs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 266px;
+  min-height: 60px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.c-msgs::-webkit-scrollbar { width: 5px; }
+.c-msgs::-webkit-scrollbar-thumb { background: rgba(140, 170, 190, 0.45); border-radius: 3px; }
+
+.c-msgs li {
+  max-width: 86%;
+  padding: 5px 9px;
+  border-radius: 11px;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.c-msgs li.me {
+  align-self: flex-end;
+  background: #4aa8dd;
+  color: #fff;
+  border-bottom-right-radius: 3px;
+}
+.c-msgs li.her {
+  align-self: flex-start;
+  background: rgba(120, 190, 235, 0.16);
+  color: #22374d;
+  border-bottom-left-radius: 3px;
+}
+.c-msgs li.her.streaming { opacity: 0.92; }
+.c-msgs li.sys {
+  align-self: center;
+  background: transparent;
+  color: #9fb3c2;
+  font-size: 10.5px;
+  padding: 0;
+  max-width: 100%;
+  text-align: center;
+}
+.c-msgs li .emo { font-size: 11px; opacity: 0.8; margin-left: 5px; }
+
+.c-thinking {
+  font-size: 11px;
+  color: #8fa4b3;
+  padding: 5px 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.c-thinking i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #9fc6df;
+  animation: blink 1.1s infinite;
+}
+.c-thinking i:nth-child(2) { animation-delay: 0.18s; }
+.c-thinking i:nth-child(3) { animation-delay: 0.36s; }
+@keyframes blink { 0%, 60%, 100% { opacity: 0.25 } 30% { opacity: 1 } }
+
+.c-input { display: flex; gap: 6px; align-items: flex-end; margin-top: 8px; }
+
+.c-input textarea {
+  flex: 1;
+  box-sizing: border-box;
+  resize: none;
+  min-height: 30px;
+  max-height: 76px;
+  border: 1px solid rgba(120, 190, 235, 0.7);
+  border-radius: 9px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: #22374d;
+  background: #fff;
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.c-input textarea:focus { border-color: #1b6fa8; box-shadow: 0 0 0 2px rgba(120, 190, 235, 0.28); }
+
+.c-input button {
+  flex: none;
+  padding: 6px 13px;
+  border-radius: 9px;
+  border: none;
+  background: #4aa8dd;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.c-input button:disabled { background: #b9cfdd; cursor: not-allowed; }
+
+.c-foot { display: flex; gap: 6px; margin-top: 7px; }
+.c-foot button { padding: 3px 8px; font-size: 11px; }

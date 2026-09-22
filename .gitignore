@@ -6,6 +6,8 @@ app/dist/
 *.log
 pet-state.json
 settings.json
+chat.json
+chat-history.json
 
 # 调试产物
 _shots/

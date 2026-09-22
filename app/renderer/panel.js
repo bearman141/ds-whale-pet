@@ -48,29 +48,15 @@
     } else {
       clearInterval(tickTimer); tickTimer = null
       clearInterval(posTimer); posTimer = null
+      if (window.PetView && window.PetView.relayout) window.PetView.relayout()
     }
     api.log(`状态面板 ${visible ? '打开' : '关闭'}`)
   }
 
+  /** 定位统一交给 pet.js 的 layoutPanels（两个面板在同一个 flex 容器里） */
   function position () {
     if (!visible) return
-    const view = window.PetView
-    const wa = view ? view.workArea() : { x: 0, y: 0, width: innerWidth, height: innerHeight }
-    const a = view ? view.anchor() : { x: innerWidth - 200, y: innerHeight - 40 }
-    const r = panel.getBoundingClientRect()
-    if (!r.width) return
-
-    // 默认放宠物左边，放不下就换到右边
-    let left = a.x - r.width - 30
-    if (left < wa.x + 8) left = a.x + 30
-    left = Math.max(wa.x + 8, Math.min(left, wa.x + wa.width - r.width - 8))
-
-    let top = a.y - r.height
-    const maxTop = wa.y + wa.height - r.height - 8
-    top = Math.max(wa.y + 8, Math.min(top, maxTop))
-
-    panel.style.left = Math.round(left) + 'px'
-    panel.style.top = Math.round(top) + 'px'
+    if (window.PetView && window.PetView.relayout) window.PetView.relayout()
   }
 
   /* ------------------------------------------------------------ *

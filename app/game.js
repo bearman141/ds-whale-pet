@@ -322,7 +322,7 @@ function createState (now = Date.now()) {
     level: 1,
     sleeping: false,
     cooldowns: {},
-    counters: { feed: 0, play: 0, pet: 0, clean: 0, gift: 0, levelUps: 0 },
+    counters: { feed: 0, play: 0, pet: 0, clean: 0, gift: 0, chat: 0, levelUps: 0 },
     log: [],
   }
 }
@@ -557,23 +557,7 @@ class Game {
     if (name === 'play') s.lastPlay = now
 
     /* 经验 & 升级 */
-    if (a.exp) {
-      s.exp += a.exp
-      const lv = levelFromExp(s.exp)
-      if (lv > s.level) {
-        s.level = lv
-        s.counters.levelUps++
-        events.push({ type: 'log', icon: '🎉', text: `升级到 Lv.${lv} ——「${titleFor(lv)}」` })
-        events.push({ type: 'bubble', text: `升级了！Lv.${lv}「${titleFor(lv)}」` })
-        events.push({ type: 'expression', target: '双手比耶', ttl: 6000, layer: 'event' })
-        events.push({ type: 'motion', target: '自拍简单' })
-        // 升级小奖励
-        s.stats.mood = clamp(s.stats.mood + 10)
-        s.affection = clamp(s.affection + 3, 0, 100)
-        this._lastAutonomy = now
-        this._nextAutonomy = 8000
-      }
-    }
+    this._award(a.exp, now, events)
 
     /* 表现层 */
     events.push({ type: 'log', icon: a.icon, text: `${a.label}了` })
@@ -597,6 +581,57 @@ class Game {
     return { ok: true, events }
   }
 
+  /* ---------------- 经验 / 升级 ---------------- */
+  /** 加经验并在升级时补上事件与奖励 */
+  _award (exp, now, events) {
+    const s = this.s
+    if (!exp) return
+    s.exp += exp
+    const lv = levelFromExp(s.exp)
+    if (lv <= s.level) return
+    s.level = lv
+    s.counters.levelUps = (s.counters.levelUps || 0) + 1
+    events.push({ type: 'log', icon: '🎉', text: `升级到 Lv.${lv} ——「${titleFor(lv)}」` })
+    events.push({ type: 'bubble', text: `升级了！Lv.${lv}「${titleFor(lv)}」` })
+    events.push({ type: 'expression', target: '双手比耶', ttl: 6000, layer: 'event' })
+    events.push({ type: 'motion', target: '自拍简单' })
+    s.stats.mood = clamp(s.stats.mood + 10)
+    s.affection = clamp(s.affection + 3, 0, 100)
+    this._lastAutonomy = now
+    this._nextAutonomy = 8000
+  }
+
+  /* ---------------- 聊天 ---------------- */
+  /**
+   * 用户跟她说了一句话。
+   * 不管有没有奖励，都会刷新 lastInteract（所以聊天能治「被冷落」）。
+   * 奖励本身有 15 秒冷却，防止刷好感。
+   */
+  noteChat (now = Date.now()) {
+    const s = this.s
+    s.lastInteract = now
+    const events = []
+
+    if (now < (s.cooldowns.chat || 0)) {
+      this.evaluateMood(now)
+      return { rewarded: false, events }
+    }
+
+    s.cooldowns.chat = now + 15e3
+    s.counters.chat = (s.counters.chat || 0) + 1
+    s.stats.mood = clamp(s.stats.mood + 2)
+    s.affection = clamp(s.affection + 0.5, 0, 100)
+    this._award(2, now, events)
+
+    for (const ach of this.checkAchievements()) {
+      events.push({ type: 'log', icon: '🏆', text: `解锁成就：${ach}` })
+      events.push({ type: 'expression', target: '星星眼', ttl: 6000, layer: 'event' })
+    }
+
+    this.evaluateMood(now)
+    return { rewarded: true, events }
+  }
+
   /* ---------------- 成就 ---------------- */
   checkAchievements () {
     const s = this.s
@@ -613,6 +648,7 @@ class Game {
     add('pet50', s.counters.pet >= 50, '被摸头 50 次')
     add('clean10', s.counters.clean >= 10, '洗了 10 次澡')
     add('gift5', s.counters.gift >= 5, '收到 5 份礼物')
+    add('chat20', (s.counters.chat || 0) >= 20, '和她聊天 20 次')
     add('lv5', s.level >= 5, '到达 Lv.5')
     add('aff60', s.affection >= 60, '好感度 60')
     add('aff90', s.affection >= 90, '好感度 90')

@@ -17,45 +17,103 @@
   <div id="hint" class="hidden">
     <b>你好呀，我是 DS鲸鱼娘 🐋</b>
     <span>拖动我换位置 · 左键摸摸头 · 右键打开菜单 · 双击收起手动表情</span>
-    <span>右键菜单 →「🐋 照顾她」可以喂饭、玩耍、洗澡、送礼、哄睡</span>
-    <span class="dim">Ctrl+Alt+T 打开状态面板 ｜ 模型作者：B站 @氵六青</span>
+    <span>右键菜单 →「🐋 照顾她」喂饭、玩耍、洗澡、送礼、哄睡</span>
+    <span>「💬 和她聊天」可以接自己的大模型 API 跟我说话</span>
+    <span class="dim">Ctrl+Alt+T 状态面板 ｜ Ctrl+Alt+L 聊天 ｜ 模型作者：B站 @氵六青</span>
   </div>
 
-  <!-- ============ 状态面板 ============ -->
-  <div id="panel" class="hidden">
-    <div class="p-head">
-      <span class="p-emoji" id="p-emoji">🐋</span>
-      <div class="p-title">
-        <input id="p-name" maxlength="12" spellcheck="false" autocomplete="off">
-        <div class="p-sub"><span id="p-level">Lv.1</span> · <span id="p-title-text">陌生的鲸</span></div>
+  <!-- ============ 面板区（两个面板并排，整体贴着宠物） ============ -->
+  <div id="panels">
+
+    <!-- 状态面板 -->
+    <div id="panel" class="card hidden">
+      <div class="p-head">
+        <span class="p-emoji" id="p-emoji">🐋</span>
+        <div class="p-title">
+          <input id="p-name" maxlength="12" spellcheck="false" autocomplete="off">
+          <div class="p-sub"><span id="p-level">Lv.1</span> · <span id="p-title-text">陌生的鲸</span></div>
+        </div>
+        <button id="p-close" title="关闭面板">×</button>
       </div>
-      <button id="p-close" title="关闭面板">×</button>
+
+      <div class="p-moodrow">
+        <div class="p-mood" id="p-mood-name">发呆</div>
+        <div class="p-reason" id="p-reason">——</div>
+      </div>
+
+      <div class="p-bars" id="p-bars"></div>
+
+      <div class="p-sep"></div>
+
+      <div class="p-line"><span>❤️ 好感度</span><span id="p-aff-val">0.0 / 100</span></div>
+      <div class="p-bar aff"><i id="p-aff-fill"></i></div>
+
+      <div class="p-line"><span id="p-exp-label">EXP 0 / 20</span><span id="p-ach">🏆 0</span></div>
+      <div class="p-bar exp"><i id="p-exp-fill"></i></div>
+
+      <div class="p-actions" id="p-actions"></div>
+
+      <div class="p-logtitle">最近发生</div>
+      <ul class="p-log" id="p-log"></ul>
+
+      <div class="p-foot">
+        <span id="p-uptime">相处 0 小时</span>
+        <button id="p-reset">重新领养</button>
+      </div>
     </div>
 
-    <div class="p-moodrow">
-      <div class="p-mood" id="p-mood-name">发呆</div>
-      <div class="p-reason" id="p-reason">——</div>
+    <!-- 聊天面板 -->
+    <div id="chat" class="card hidden">
+      <div class="p-head">
+        <span class="p-emoji">💬</span>
+        <div class="p-title">
+          <div class="c-title">和她聊天</div>
+          <div class="p-sub" id="c-sub">未配置接口</div>
+        </div>
+        <button id="c-close" title="关闭面板">×</button>
+      </div>
+
+      <!-- 首次配置 -->
+      <div id="c-setup">
+        <label class="c-field">接口地址
+          <input id="c-base" spellcheck="false" placeholder="https://api.deepseek.com/v1">
+        </label>
+        <label class="c-field">模型名
+          <input id="c-model" spellcheck="false" placeholder="deepseek-chat">
+        </label>
+        <label class="c-field">API Key<span id="c-key-hint" class="c-dim"></span>
+          <input id="c-key" type="password" spellcheck="false" autocomplete="off" placeholder="sk-...">
+        </label>
+        <label class="c-field">补充人设（可选）
+          <textarea id="c-extra" rows="2" spellcheck="false" placeholder="例如：说话再随便一点，多用颜文字"></textarea>
+        </label>
+        <div class="c-row">
+          <button id="c-save" class="primary">保存并开始</button>
+          <button id="c-test">测试连接</button>
+        </div>
+        <div class="c-msg" id="c-setup-msg"></div>
+        <div class="c-dim c-tip">
+          支持任何 OpenAI 兼容接口：DeepSeek / OpenAI / Moonshot / 智谱 / Ollama / LM Studio / one-api。<br>
+          密钥只存在本机 <code>%APPDATA%\DSWhalePet\chat.json</code>，不会上传。
+        </div>
+      </div>
+
+      <!-- 对话 -->
+      <div id="c-main" class="hidden">
+        <ul class="c-msgs" id="c-msgs"></ul>
+        <div class="c-thinking hidden" id="c-thinking"><i></i><i></i><i></i> 她正在想…</div>
+        <div class="c-input">
+          <textarea id="c-text" rows="1" spellcheck="false" placeholder="和她说点什么…（Enter 发送，Shift+Enter 换行）"></textarea>
+          <button id="c-send" title="发送">发送</button>
+        </div>
+        <div class="c-foot">
+          <button id="c-clear">清空对话</button>
+          <button id="c-settings">接口设置</button>
+        </div>
+        <div class="c-msg" id="c-msg"></div>
+      </div>
     </div>
 
-    <div class="p-bars" id="p-bars"></div>
-
-    <div class="p-sep"></div>
-
-    <div class="p-line"><span>❤️ 好感度</span><span id="p-aff-val">0.0 / 100</span></div>
-    <div class="p-bar aff"><i id="p-aff-fill"></i></div>
-
-    <div class="p-line"><span id="p-exp-label">EXP 0 / 20</span><span id="p-ach">🏆 0</span></div>
-    <div class="p-bar exp"><i id="p-exp-fill"></i></div>
-
-    <div class="p-actions" id="p-actions"></div>
-
-    <div class="p-logtitle">最近发生</div>
-    <ul class="p-log" id="p-log"></ul>
-
-    <div class="p-foot">
-      <span id="p-uptime">相处 0 小时</span>
-      <button id="p-reset">重新领养</button>
-    </div>
   </div>
 
   <noscript>需要启用 JavaScript</noscript>
@@ -65,5 +123,6 @@
   <script src="pet://local/vendor/pixi-live2d-display.cubism4.min.js"></script>
   <script src="pet://local/renderer/pet.js"></script>
   <script src="pet://local/renderer/panel.js"></script>
+  <script src="pet://local/renderer/chat.js"></script>
 </body>
 </html>

@@ -74,13 +74,17 @@
   const bubbleText = document.getElementById('bubble-text')
   const hint = document.getElementById('hint')
   const panelEl = document.getElementById('panel')
+  const panelsEl = document.getElementById('panels')
   let bubbleTimer = null
 
-  /** 面板是否正盖在这个点上（面板是 DOM，读像素那一套测不到它） */
+  /** 指针是否落在某个可见面板上（面板是 DOM，读像素那套测不到它们） */
   function panelCovers (x, y) {
-    if (!panelEl || panelEl.classList.contains('hidden')) return false
-    const r = panelEl.getBoundingClientRect()
-    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom
+    for (const card of document.querySelectorAll('#panels .card')) {
+      if (card.classList.contains('hidden')) continue
+      const r = card.getBoundingClientRect()
+      if (r.width && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true
+    }
+    return false
   }
 
   /* ============================================================ *
@@ -257,7 +261,30 @@
     model.scale.set(s)
     model.position.set(petX, petY)
     positionOverlays()
+    layoutPanels()
     needHitTest = true
+  }
+
+  /**
+   * 把整个面板区贴到宠物左边；左边放不下就翻到右边，最后夹进工作区。
+   * 两个面板都塞在 #panels 这个 flex 容器里，所以这里只需要算一次坐标。
+   */
+  function layoutPanels () {
+    if (!panelsEl) return
+    if (!panelsEl.querySelector('.card:not(.hidden)')) return
+    const r = panelsEl.getBoundingClientRect()
+    if (!r.width || !r.height) return
+
+    const maxLeft = Math.max(workArea.x + 8, workArea.x + workArea.width - r.width - 8)
+    let left = petX - 30 - r.width
+    if (left < workArea.x + 8) left = petX + 30
+    left = clamp(left, workArea.x + 8, maxLeft)
+
+    const maxTop = Math.max(workArea.y + 8, workArea.y + workArea.height - r.height - 8)
+    const top = clamp(petY - r.height, workArea.y + 8, maxTop)
+
+    panelsEl.style.left = Math.round(left) + 'px'
+    panelsEl.style.top = Math.round(top) + 'px'
   }
 
   function positionOverlays () {
@@ -668,7 +695,7 @@
       for (const ev of events || []) {
         switch (ev.type) {
           case 'bubble':
-            showBubble(ev.text)
+            showBubble(ev.text, ev.ms || 2600)
             break
           case 'expression':
             addExpression(ev.target, ev.layer || 'event', ev.ttl || 6000)
@@ -725,11 +752,11 @@
     api.log(`未处理的 Promise 拒绝: ${e.reason && (e.reason.message || e.reason)}`)
   })
 
-  /* 给状态面板（panel.js）用的只读视图 */
+  /* 给面板（panel.js / chat.js）用的只读视图 + 布局回调 */
   window.PetView = {
     anchor: () => ({ x: petX, y: petY, height: petHeight }),
     workArea: () => ({ ...workArea }),
-    openPanel: () => window.dispatchEvent(new Event('petview:openpanel')),
+    relayout: () => layoutPanels(),
   }
 
   boot().catch((err) => {
