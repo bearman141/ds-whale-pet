@@ -1,0 +1,254 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ================= 气泡 ================= */
+#bubble {
+  position: fixed;
+  left: 0;
+  top: 0;
+  padding: 5px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #23405c;
+  font-size: 13px;
+  line-height: 1.34;
+  white-space: nowrap;
+  box-shadow: 0 3px 12px rgba(10, 40, 70, 0.28);
+  border: 1px solid rgba(120, 190, 235, 0.85);
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+  will-change: transform, opacity;
+  max-width: 340px;
+}
+
+#bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  margin-left: -7px;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 8px solid rgba(255, 255, 255, 0.94);
+  filter: drop-shadow(0 1px 0 rgba(120, 190, 235, 0.85));
+}
+
+#bubble.hidden { opacity: 0; transform: translate(-50%, -85%); }
+
+/* ================= 首次提示 ================= */
+#hint {
+  position: fixed;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #22374d;
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 6px 22px rgba(10, 40, 70, 0.3);
+  border: 1px solid rgba(120, 190, 235, 0.9);
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+  max-width: 420px;
+}
+
+#hint b { font-size: 14px; color: #1b6fa8; }
+#hint .dim { color: #7d8f9e; font-size: 11.5px; }
+#hint.hidden { opacity: 0; }
+
+/* ================= 状态面板 ================= */
+#panel {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 296px;
+  box-sizing: border-box;
+  padding: 12px 13px 10px;
+  border-radius: 16px;
+  background: rgba(252, 253, 255, 0.965);
+  border: 1px solid rgba(120, 190, 235, 0.9);
+  box-shadow: 0 10px 30px rgba(10, 40, 70, 0.3);
+  color: #22374d;
+  font-size: 12.5px;
+  line-height: 1.45;
+  opacity: 1;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  transform-origin: bottom right;
+}
+
+#panel.hidden {
+  opacity: 0;
+  transform: scale(0.96);
+  pointer-events: none;
+}
+
+/* ---- 头部 ---- */
+.p-head { display: flex; align-items: center; gap: 8px; }
+.p-emoji { font-size: 22px; line-height: 1; }
+
+.p-title { flex: 1; min-width: 0; }
+
+#p-name {
+  width: 100%;
+  border: none;
+  border-bottom: 1px dashed transparent;
+  background: transparent;
+  color: #17405f;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 0 0 1px;
+  outline: none;
+}
+#p-name:hover { border-bottom-color: rgba(120, 190, 235, 0.9); }
+#p-name:focus { border-bottom-color: #1b6fa8; background: rgba(120, 190, 235, 0.12); }
+
+.p-sub { font-size: 11px; color: #7d8f9e; }
+
+#p-close {
+  border: none;
+  background: transparent;
+  color: #9fb3c2;
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+#p-close:hover { color: #e2607f; }
+
+/* ---- 当前情绪 ---- */
+.p-moodrow {
+  margin-top: 9px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(120, 190, 235, 0.18), rgba(255, 180, 210, 0.18));
+  border: 1px solid rgba(120, 190, 235, 0.35);
+}
+.p-mood { font-size: 13px; font-weight: 700; color: #1b6fa8; }
+.p-reason { font-size: 11px; color: #6f8496; margin-top: 1px; }
+
+/* ---- 属性条 ---- */
+.p-bars { margin-top: 9px; display: flex; flex-direction: column; gap: 6px; }
+
+.p-line {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #55707f;
+  margin-bottom: 2px;
+}
+
+.p-bar {
+  height: 7px;
+  border-radius: 5px;
+  background: rgba(140, 170, 190, 0.22);
+  overflow: hidden;
+}
+.p-bar > i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 5px;
+  background: #5ec8f5;
+  transition: width 0.45s ease, background 0.3s ease;
+}
+.p-bar.aff > i { background: linear-gradient(90deg, #ff9ec0, #ff5f92); }
+.p-bar.exp > i { background: linear-gradient(90deg, #8fd7f0, #4aa8dd); }
+
+.p-sep { height: 1px; background: rgba(140, 170, 190, 0.25); margin: 10px 0 8px; }
+
+/* ---- 互动按钮 ---- */
+.p-actions {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+
+.p-actions button {
+  position: relative;
+  padding: 6px 2px 5px;
+  border-radius: 9px;
+  border: 1px solid rgba(120, 190, 235, 0.7);
+  background: rgba(120, 190, 235, 0.13);
+  color: #1d5c86;
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  overflow: hidden;
+  transition: background 0.15s ease, transform 0.08s ease;
+}
+.p-actions button:hover:not(:disabled) { background: rgba(120, 190, 235, 0.3); }
+.p-actions button:active:not(:disabled) { transform: scale(0.96); }
+.p-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+.p-actions button .ico { font-size: 14px; display: block; line-height: 1.15; }
+
+/* ---- 事件流 ---- */
+.p-logtitle {
+  margin: 11px 0 4px;
+  font-size: 11px;
+  color: #8fa4b3;
+  letter-spacing: 0.4px;
+}
+
+.p-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 84px;
+  overflow-y: auto;
+  font-size: 11px;
+  color: #5d7280;
+}
+.p-log::-webkit-scrollbar { width: 5px; }
+.p-log::-webkit-scrollbar-thumb { background: rgba(140, 170, 190, 0.45); border-radius: 3px; }
+.p-log li { padding: 1.5px 0; display: flex; gap: 5px; }
+.p-log li .t { color: #a8b8c4; flex: none; }
+
+/* ---- 底部 ---- */
+.p-foot {
+  margin-top: 9px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(140, 170, 190, 0.25);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #93a7b5;
+}
+
+#p-reset {
+  border: 1px solid rgba(226, 96, 127, 0.45);
+  background: transparent;
+  color: #d4708c;
+  border-radius: 7px;
+  padding: 2px 9px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+#p-reset:hover { background: rgba(226, 96, 127, 0.12); }

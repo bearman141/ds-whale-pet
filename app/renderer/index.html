@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';">
+  <title>DS鲸鱼娘 桌宠</title>
+  <link rel="stylesheet" href="pet://local/renderer/style.css">
+</head>
+<body>
+  <canvas id="stage"></canvas>
+
+  <!-- 触发动作时的小气泡 -->
+  <div id="bubble" class="hidden"><span id="bubble-text"></span></div>
+
+  <!-- 首次运行提示 -->
+  <div id="hint" class="hidden">
+    <b>你好呀，我是 DS鲸鱼娘 🐋</b>
+    <span>拖动我换位置 · 左键摸摸头 · 右键打开菜单 · 双击收起手动表情</span>
+    <span>右键菜单 →「🐋 照顾她」可以喂饭、玩耍、洗澡、送礼、哄睡</span>
+    <span class="dim">Ctrl+Alt+T 打开状态面板 ｜ 模型作者：B站 @氵六青</span>
+  </div>
+
+  <!-- ============ 状态面板 ============ -->
+  <div id="panel" class="hidden">
+    <div class="p-head">
+      <span class="p-emoji" id="p-emoji">🐋</span>
+      <div class="p-title">
+        <input id="p-name" maxlength="12" spellcheck="false" autocomplete="off">
+        <div class="p-sub"><span id="p-level">Lv.1</span> · <span id="p-title-text">陌生的鲸</span></div>
+      </div>
+      <button id="p-close" title="关闭面板">×</button>
+    </div>
+
+    <div class="p-moodrow">
+      <div class="p-mood" id="p-mood-name">发呆</div>
+      <div class="p-reason" id="p-reason">——</div>
+    </div>
+
+    <div class="p-bars" id="p-bars"></div>
+
+    <div class="p-sep"></div>
+
+    <div class="p-line"><span>❤️ 好感度</span><span id="p-aff-val">0.0 / 100</span></div>
+    <div class="p-bar aff"><i id="p-aff-fill"></i></div>
+
+    <div class="p-line"><span id="p-exp-label">EXP 0 / 20</span><span id="p-ach">🏆 0</span></div>
+    <div class="p-bar exp"><i id="p-exp-fill"></i></div>
+
+    <div class="p-actions" id="p-actions"></div>
+
+    <div class="p-logtitle">最近发生</div>
+    <ul class="p-log" id="p-log"></ul>
+
+    <div class="p-foot">
+      <span id="p-uptime">相处 0 小时</span>
+      <button id="p-reset">重新领养</button>
+    </div>
+  </div>
+
+  <noscript>需要启用 JavaScript</noscript>
+
+  <script src="pet://local/vendor/live2dcubismcore.min.js"></script>
+  <script src="pet://local/vendor/pixi.min.js"></script>
+  <script src="pet://local/vendor/pixi-live2d-display.cubism4.min.js"></script>
+  <script src="pet://local/renderer/pet.js"></script>
+  <script src="pet://local/renderer/panel.js"></script>
+</body>
+</html>

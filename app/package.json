@@ -1,0 +1,50 @@
+{
+  "name": "ds-whale-pet",
+  "productName": "DS鲸鱼娘桌宠",
+  "version": "1.0.0",
+  "description": "DS鲸鱼娘 Live2D 桌面宠物（Electron + Cubism 4）",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:model": "node tools/make-model3.js",
+    "pack": "electron-builder --win --x64"
+  },
+  "author": "桌宠外壳打包（模型：B站 @氵六青）",
+  "license": "ISC",
+  "dependencies": {
+    "uiohook-napi": "^1.5.5"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7"
+  },
+  "build": {
+    "appId": "com.dsh.dswhalepet",
+    "productName": "DS鲸鱼娘桌宠",
+    "files": [
+      "main.js",
+      "preload.js",
+      "catalog.js",
+      "renderer/**/*",
+      "vendor/**/*",
+      "model/**/*",
+      "assets/**/*",
+      "tools/**/*",
+      "按键表.txt"
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ],
+      "icon": "assets/icon.png"
+    },
+    "portable": {
+      "artifactName": "DS鲸鱼娘桌宠.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "DS鲸鱼娘桌宠-安装包.exe"
+    }
+  }
+}

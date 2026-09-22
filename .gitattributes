@@ -1,0 +1,16 @@
+# 统一换行符，免得 Windows 检出后整个仓库显示成「全改了」
+* text=auto eol=lf
+
+# Windows 专属脚本必须 CRLF
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+*.vbs  text eol=crlf
+
+# 二进制资源，别做任何行尾/编码转换
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.moc3 binary
+*.zip  binary
+*.exe  binary

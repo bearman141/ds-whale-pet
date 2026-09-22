@@ -1,0 +1,21 @@
+# 依赖
+node_modules/
+app/dist/
+
+# 运行时产物
+*.log
+pet-state.json
+settings.json
+
+# 调试产物
+_shots/
+_screenshots/
+
+# 原始模型的两个变体（内容与 app/model/ 重复，仓库只保留 app/model/）
+DS面捕版/
+DS鼠控版/
+
+# 系统垃圾
+Thumbs.db
+Desktop.ini
+.DS_Store
