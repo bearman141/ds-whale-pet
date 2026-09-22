@@ -11,6 +11,8 @@
 *.png  binary
 *.jpg  binary
 *.ico  binary
+*.wav  binary
+*.mp3  binary
 *.moc3 binary
 *.zip  binary
 *.exe  binary

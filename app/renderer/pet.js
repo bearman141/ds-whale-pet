@@ -118,6 +118,7 @@
     startTicker()
     bindPointer()
     bindIpc()
+    initSfx()
     playIdle()
 
     // 养成系统：开局先把当前情绪的条件结果套上
@@ -598,6 +599,48 @@
   }
 
   /* ============================================================ *
+   * 互动音效
+   *
+   * 音效全部由 app/tools/make-sfx.js 程序合成 —— 不引外部素材，
+   * 所以授权可以跟着 MIT 走（下载来的「免费音效」大多禁止再分发）。
+   *
+   * 用 <audio> + cloneNode 是为了让同一个音效可以重叠播放（连点的时候）。
+   * 自动播放限制由主进程的 autoplay-policy 开关解除。
+   * ============================================================ */
+  const SFX_NAMES = ['squeak', 'happy', 'nom', 'boing', 'splash', 'sparkle', 'levelup', 'sleepy', 'no', 'wake']
+  const sfxPool = new Map()
+  let sfxVerified = false
+
+  function initSfx () {
+    for (const n of SFX_NAMES) {
+      const a = new Audio(`pet://local/sfx/${n}.wav`)
+      a.preload = 'auto'
+      sfxPool.set(n, a)
+    }
+    api.log(`音效已装载 ${SFX_NAMES.length} 个`)
+  }
+
+  function playSfx (name, gain = 1, force = false) {
+    if ((!settings.sfx && !force) || !name) return
+    const base = sfxPool.get(name)
+    if (!base) { api.log('未知音效: ' + name); return }
+    try {
+      const a = base.cloneNode()
+      const vol = settings.sfxVolume == null ? 0.6 : settings.sfxVolume
+      a.volume = Math.max(0, Math.min(1, vol * gain))
+      const p = a.play()
+      if (p && p.then) {
+        p.then(() => {
+          // play() 只有真的开始播才会 resolve，这行足以证明音频通路是通的
+          if (!sfxVerified) { sfxVerified = true; api.log(`音效播放成功（首个：${name}，音量 ${a.volume.toFixed(2)}）`) }
+        }).catch((e) => api.log(`音效播放失败 ${name}: ${e.message}`))
+      }
+    } catch (e) {
+      api.log('音效异常: ' + e.message)
+    }
+  }
+
+  /* ============================================================ *
    * 指针交互
    * ============================================================ */
   function bindPointer () {
@@ -719,6 +762,9 @@
           case 'motion':
             playMotion(ev.target)
             break
+          case 'sound':
+            playSfx(ev.name, ev.gain || 1)
+            break
           case 'mood':
             api.log(`情绪变化 -> ${ev.emoji} ${ev.name}（${ev.reason}）`)
             // 只有「有需求」的情绪才值得打断你
@@ -764,6 +810,17 @@
       settings.bubble = on
       if (!on) bubble.classList.add('hidden')
     })
+
+    api.onSfxSetting((s) => {
+      if (!s) return
+      const wasOn = settings.sfx
+      settings.sfx = !!s.enabled
+      settings.sfxVolume = s.volume
+      // 从关到开时给个即时反馈
+      if (settings.sfx && !wasOn) playSfx('squeak', 0.8)
+    })
+
+    api.onSfxTest(() => playSfx('sparkle', 1, true))
   }
 
   /* ============================================================ *

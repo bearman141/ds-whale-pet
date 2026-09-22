@@ -206,6 +206,64 @@ const f1 = g.act('feed', clock + 300)
 ok(!f1.ok && f1.events.length > 0, '普通的「吃太饱」被拒时仍然有反馈气泡', f1.events.length)
 
 /* ------------------------------------------------------------------ */
+section('互动音效')
+{
+  const { ACTIONS } = require('../game')
+  const sfxOf = (events) => events.filter((e) => e.type === 'sound').map((e) => e.name)
+
+  g = newGame()
+  ok(sfxOf(g.act('feed', clock).events).includes('nom'), '喂食 → 咀嚼音')
+  ok(sfxOf(g.act('play', clock).events).includes('boing'), '玩耍 → 弹跳音')
+  ok(sfxOf(g.act('pet', clock).events).includes('squeak'), '摸摸头 → 小黄鸭音')
+  ok(sfxOf(g.act('clean', clock).events).includes('splash'), '洗澡 → 水花音')
+  ok(sfxOf(g.act('gift', clock).events).includes('sparkle'), '送礼物 → 闪光音')
+
+  const sl = g.act('sleep', clock)
+  ok(g.s.sleeping && sfxOf(sl.events).includes('sleepy'), '睡觉 → 哈欠音')
+  const wk = g.act('sleep', clock + 5000)
+  ok(!g.s.sleeping && sfxOf(wk.events).includes('wake'), '叫醒 → 起床音')
+
+  g.s.stats.satiety = 100
+  g.s.cooldowns.feed = 0
+  ok(sfxOf(g.act('feed', clock).events).includes('no'), '操作被拒 → 提示音')
+
+  // 升级音：把经验推到刚好差一点，再喂一次
+  g = newGame()
+  const { LEVELS } = require('../game')
+  g.s.exp = LEVELS[1] - 1
+  ok(sfxOf(g.act('feed', clock).events).includes('levelup'), '升级 → 升级音')
+
+  // 静默拒绝（连点摸头）不该有声音，否则连点会刷爆
+  g = newGame()
+  g.act('pet', clock)
+  ok(sfxOf(g.act('pet', clock + 100).events).length === 0, '连点被静默吞掉时不发声')
+
+  // 从负面情绪被哄好 → 开心音
+  g = newGame()
+  g.s.stats.satiety = 18
+  g.s.stats.mood = 50
+  g.evaluateMood(clock)
+  ok(g.mood.id === 'hungry', '先把她弄饿', g.mood.id)
+  const fed = g.act('feed', clock)
+  ok(g.mood.id !== 'hungry', '喂完不饿了', g.mood.id)
+  ok(sfxOf(fed.events).includes('happy'), '从饿到吃饱 → 开心音')
+
+  /* 引用的音效名必须都有对应文件（防止改名漏改） */
+  const fsx = require('fs')
+  const pathx = require('path')
+  const sfxDir = pathx.join(__dirname, '..', 'sfx')
+  const files = fsx.readdirSync(sfxDir).filter((f) => f.endsWith('.wav')).map((f) => f.slice(0, -4))
+  // 由非 ACTION 代码路径发出的音效也要算进来
+  const referenced = new Set(['no', 'levelup', 'sparkle', 'sleepy', 'wake', 'happy'])
+  for (const a of Object.values(ACTIONS)) if (a.sfx) referenced.add(a.sfx)
+  const missing = [...referenced].filter((n) => !files.includes(n))
+  const unused = files.filter((n) => !referenced.has(n))
+  ok(files.length >= 10, `sfx 目录里有 ${files.length} 个音效文件`)
+  ok(missing.length === 0, '引用的音效全部存在', missing)
+  ok(unused.length === 0, '没有生成了却没人用的音效', unused)
+}
+
+/* ------------------------------------------------------------------ */
 section('存档往返')
 g = newGame()
 g.act('feed', clock)

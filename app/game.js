@@ -55,13 +55,16 @@ const TITLES = [
   [10, '命中注定'],
 ]
 
+/** 这些是「有需求」的负面情绪，用来判断她是不是刚被哄好 */
+const NEGATIVE_MOODS = new Set(['starving', 'exhausted', 'angry', 'hungry', 'dirty', 'lonely', 'sad'])
+
 /* ================================================================== *
  * 交互定义
  * ================================================================== */
 
 const ACTIONS = {
   feed: {
-    label: '喂食', icon: '🍚', cooldown: 45e3,
+    label: '喂食', icon: '🍚', cooldown: 45e3, sfx: 'nom',
     effect: { satiety: 22, mood: 6, clean: -3 },
     exp: 6, affection: 1,
     block: (s) => (s.satiety > 94 ? '已经吃得很饱啦，再吃要撑到' : null),
@@ -69,7 +72,7 @@ const ACTIONS = {
     expressions: ['开心兴奋'], motion: '开盖',
   },
   play: {
-    label: '玩耍', icon: '🎾', cooldown: 60e3,
+    label: '玩耍', icon: '🎾', cooldown: 60e3, sfx: 'boing',
     effect: { mood: 15, energy: -11, satiety: -4, clean: -4 },
     exp: 9, affection: 2,
     block: (s, ctx) => (s.energy < 15 ? '太累了……玩不动……' : ctx.sleeping ? '人家在睡觉呢' : null),
@@ -77,7 +80,7 @@ const ACTIONS = {
     expressions: ['星星眼'], motion: '吹泡泡',
   },
   pet: {
-    label: '摸摸头', icon: '🤚', cooldown: 3000,
+    label: '摸摸头', icon: '🤚', cooldown: 3000, sfx: 'squeak',
     quietCooldown: true,          // 连点时不刷屏，静默吞掉
     effect: { mood: 4, affection: 1 },
     exp: 2, affection: 0,
@@ -85,7 +88,7 @@ const ACTIONS = {
     expressions: ['脸红'],
   },
   clean: {
-    label: '洗澡', icon: '🛁', cooldown: 120e3,
+    label: '洗澡', icon: '🛁', cooldown: 120e3, sfx: 'splash',
     effect: { clean: 42, mood: 3, energy: -4 },
     exp: 7, affection: 2,
     block: (s) => (s.clean > 92 ? '我现在很干净呀' : null),
@@ -93,7 +96,7 @@ const ACTIONS = {
     expressions: ['调皮'], motion: '喷水',
   },
   gift: {
-    label: '送礼物', icon: '🎁', cooldown: 300e3,
+    label: '送礼物', icon: '🎁', cooldown: 300e3, sfx: 'sparkle',
     effect: { mood: 20, affection: 4, clean: 2 },
     exp: 16, affection: 0,
     lines: ['这个是送给我的吗！', '哇——好开心！', '我会好好收着的', '谢谢你一直陪着我'],
@@ -422,6 +425,7 @@ class Game {
     if (!s.sleeping && s.stats.energy <= 2) {
       s.sleeping = true
       events.push({ type: 'log', icon: '💤', text: '太累了，自己睡着了' })
+      events.push({ type: 'sound', name: 'sleepy' })
       events.push({ type: 'bubble', text: '撑不住了……先睡了……' })
     }
     // 睡饱了自己醒
@@ -445,6 +449,7 @@ class Game {
     // 成就
     for (const a of this.checkAchievements()) {
       events.push({ type: 'log', icon: '🏆', text: `解锁成就：${a}` })
+      events.push({ type: 'sound', name: 'sparkle' })
       events.push({ type: 'bubble', text: '诶？我好像变厉害了！' })
       events.push({ type: 'expression', target: '星星眼', ttl: 6000 })
     }
@@ -525,6 +530,7 @@ class Game {
         events: quiet
           ? []
           : [
+              { type: 'sound', name: 'no' },
               { type: 'bubble', text: can.reason },
               { type: 'expression', target: '流汗', ttl: 3000, layer: 'event' },
             ],
@@ -533,6 +539,8 @@ class Game {
 
     const events = []
     const s = this.s
+    // 记下互动前的情绪，用来判断这一下是不是把她哄好了
+    const moodBefore = this.mood ? this.mood.id : ''
     s.cooldowns[name] = now + (a.cooldown || 0)
 
     /* 睡觉是开关 */
@@ -540,6 +548,7 @@ class Game {
       s.sleeping = !s.sleeping
       const line = s.sleeping ? pick(a.lines) : pick(a.wakeLines)
       events.push({ type: 'log', icon: a.icon, text: s.sleeping ? '哄她睡觉了' : '把她叫醒了' })
+      events.push({ type: 'sound', name: s.sleeping ? 'sleepy' : 'wake' })
       if (line) events.push({ type: 'bubble', text: line })
       if (!s.sleeping) events.push({ type: 'expression', target: '开心兴奋', ttl: 4000, layer: 'event' })
       s.lastInteract = now
@@ -561,6 +570,7 @@ class Game {
 
     /* 表现层 */
     events.push({ type: 'log', icon: a.icon, text: `${a.label}了` })
+    if (a.sfx) events.push({ type: 'sound', name: a.sfx })
     const line = pick(a.lines)
     if (line) events.push({ type: 'bubble', text: line })
     if (a.expressions) {
@@ -573,11 +583,19 @@ class Game {
     // 交互后立刻结算成就，不用等到下一次 tick
     for (const ach of this.checkAchievements()) {
       events.push({ type: 'log', icon: '🏆', text: `解锁成就：${ach}` })
+      events.push({ type: 'sound', name: 'sparkle' })
       events.push({ type: 'bubble', text: '诶？我好像变厉害了！' })
       events.push({ type: 'expression', target: '星星眼', ttl: 6000, layer: 'event' })
     }
 
     this.evaluateMood(now)
+
+    // 刚被从负面情绪里哄出来 —— 给一声「开心」的反馈
+    const moodAfter = this.mood ? this.mood.id : ''
+    if (NEGATIVE_MOODS.has(moodBefore) && !NEGATIVE_MOODS.has(moodAfter)) {
+      events.push({ type: 'sound', name: 'happy' })
+      events.push({ type: 'bubble', text: '心情好起来啦！' })
+    }
     return { ok: true, events }
   }
 
@@ -595,6 +613,7 @@ class Game {
     events.push({ type: 'bubble', text: `升级了！Lv.${lv}「${titleFor(lv)}」` })
     events.push({ type: 'expression', target: '双手比耶', ttl: 6000, layer: 'event' })
     events.push({ type: 'motion', target: '自拍简单' })
+    events.push({ type: 'sound', name: 'levelup' })
     s.stats.mood = clamp(s.stats.mood + 10)
     s.affection = clamp(s.affection + 3, 0, 100)
     this._lastAutonomy = now
@@ -625,6 +644,7 @@ class Game {
 
     for (const ach of this.checkAchievements()) {
       events.push({ type: 'log', icon: '🏆', text: `解锁成就：${ach}` })
+      events.push({ type: 'sound', name: 'sparkle' })
       events.push({ type: 'expression', target: '星星眼', ttl: 6000, layer: 'event' })
     }
 

@@ -46,4 +46,6 @@ contextBridge.exposeInMainWorld('petAPI', {
   /** 可交互期间主进程轮询来的真实光标位置（此时 mousemove 不再转发） */
   onCursor: (fn) => ipcRenderer.on('pet:cursor', (_e, p) => fn(p)),
   onBubbleSetting: (fn) => ipcRenderer.on('pet:bubbleSetting', (_e, on) => fn(on)),
+  onSfxSetting: (fn) => ipcRenderer.on('pet:sfxSetting', (_e, s) => fn(s)),
+  onSfxTest: (fn) => ipcRenderer.on('pet:sfx-test', () => fn()),
 })

@@ -68,6 +68,9 @@ if (has('angle-d3d9')) app.commandLine.appendSwitch('use-angle', 'd3d9')
 if (has('inprocgpu')) app.commandLine.appendSwitch('in-process-gpu')
 if (VARIANT) log('调试变体:', VARIANT)
 
+// 音效要在没有用户手势的情况下就能播（她自己是不会「先点一下页面」的）
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
+
 /* ================================================================== *
  * 设置
  * ================================================================== */
@@ -83,6 +86,8 @@ const DEFAULT_SETTINGS = {
   hotkeys: true,        // 全局热键总开关
   bubble: true,         // 触发时显示气泡
   showHint: true,       // 首次运行提示
+  sfx: true,            // 互动音效
+  sfxVolume: 0.6,       // 0..1
 }
 
 function loadSettings () {
@@ -871,6 +876,22 @@ function makeMenuTemplate (extra = []) {
       checked: settings.bubble,
       click: (mi) => applySetting('bubble', mi.checked),
     },
+    {
+      label: '🔊 互动音效',
+      type: 'checkbox',
+      checked: settings.sfx,
+      click: (mi) => applySetting('sfx', mi.checked),
+    },
+    {
+      label: '🔉 音效音量',
+      submenu: [
+        { label: '小', type: 'radio', checked: settings.sfxVolume <= 0.35, click: () => applySetting('sfxVolume', 0.3) },
+        { label: '中', type: 'radio', checked: settings.sfxVolume > 0.35 && settings.sfxVolume <= 0.8, click: () => applySetting('sfxVolume', 0.6) },
+        { label: '大', type: 'radio', checked: settings.sfxVolume > 0.8, click: () => applySetting('sfxVolume', 1) },
+        { type: 'separator' },
+        { label: '▶ 试听', click: () => win?.webContents.send('pet:sfx-test', {}) },
+      ],
+    },
     { type: 'separator' },
     {
       label: '🚀 开机自动启动',
@@ -927,6 +948,10 @@ function applySetting (key, value) {
       break
     case 'bubble':
       win?.webContents.send('pet:bubbleSetting', !!value)
+      break
+    case 'sfx':
+    case 'sfxVolume':
+      win?.webContents.send('pet:sfxSetting', { enabled: settings.sfx, volume: settings.sfxVolume })
       break
     default:
       break
