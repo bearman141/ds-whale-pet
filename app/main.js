@@ -403,8 +403,27 @@ function startUiohook () {
   }
   if (missing.length) log('uiohook 缺少按键枚举（这些组合将不可用）:', missing.join(','))
 
+  // libuiohook 在 Windows 上对 PageUp / PageDown / 方向键 / Home / End 这类键，
+  // 有时会**带上扩展位**报上来：实测 PageUp 报 61001 (0xEE49)，
+  // 而 UiohookKey.PageUp 的枚举值是 3657 (0x0E49)。只登记枚举值的话，
+  // 这些热键（按键归位、吹泡泡糖…）在真键盘上也会完全失灵。
+  // 扩展位形式是 0xEE00 | (低字节)，所以两种都登记。
+  let extAdded = 0
+  for (const [code, token] of [...keyTokenByCode]) {
+    const ext = 0xEE00 | (code & 0xFF)
+    if (ext !== code && !keyTokenByCode.has(ext)) {
+      keyTokenByCode.set(ext, token)
+      extAdded++
+    }
+  }
+  log(`按键映射就绪：${keyTokenByCode.size} 个键码（其中 ${extAdded} 个是扩展位形式）`)
+
   uIOhook.on('keydown', (e) => {
     if (!settings.hotkeys) return
+    if (process.env.DSHPET_KEYDEBUG) {
+      log(`[key] code=${e.keycode} token=${keyTokenByCode.get(e.keycode) || '(未映射)'} ` +
+        `shift=${e.shiftKey} ctrl=${e.ctrlKey} alt=${e.altKey} meta=${e.metaKey}`)
+    }
     if (pressedCodes.has(e.keycode)) return   // 忽略自动重复
     pressedCodes.add(e.keycode)
     const tokens = new Set()

@@ -61,6 +61,7 @@
   let needHitTest = false
   let interactiveNow = false
   let motionToken = 0
+  let motionBusyUntil = 0
   let lastFrame = performance.now()
   let currentMood = null
 
@@ -311,6 +312,7 @@
       }
 
       tickExpressionStack(dt)
+      motionWatchdog(now)
 
       if (needHitTest) {
         needHitTest = false
@@ -539,33 +541,80 @@
     }
   }
 
+  /**
+   * 强行回到待机。
+   *
+   * 必须先 motionManager.complete() 把优先级归零 —— 库的逻辑是
+   * 「IDLE 在有动作在播时直接拒绝」，而 currentPriority 只有动作**播完**
+   * 才会归零。一旦有个动作卡住（比如模型里 Loop:true 的循环动作），
+   * 之后连待机都起不来，她会永远定在那个动作上。
+   */
+  function forceIdle (why) {
+    if (!model) return
+    try {
+      const mm = model.internalModel.motionManager
+      if (mm && typeof mm.complete === 'function') mm.complete()
+    } catch { /* ignore */ }
+    api.log(`回待机（${why}）`)
+    playIdle()
+  }
+
   function playMotion (name) {
     if (!model) return
     const meta = motionMeta.get(name)
     const token = ++motionToken
+    const dur = (meta ? meta.duration : 3) + 0.45
     api.log(`播放动作：${name}（时长 ${meta ? meta.duration : '?'}s）`)
+
+    let returned = false
+    const backToIdle = (why) => {
+      if (returned || token !== motionToken) return
+      returned = true
+      forceIdle(`${name} ${why}`)
+    }
+    // 看门狗的时间基准：超过这个点还没回待机就说明卡了
+    motionBusyUntil = performance.now() + dur * 1000
 
     let result
     try {
       result = model.motion(name, 0, PRIORITY.NORMAL)
     } catch (e) {
       api.log(`动作播放异常 ${name}: ${e.message}`)
+      backToIdle('异常')
       return
     }
 
     if (result && result.then) {
       result.then((ok) => {
-        if (!ok) return
-        if (token !== motionToken) return
-        playIdle()
+        // 注意：ok=true 只代表「动作已开始」（实测 4~6ms 就 resolve），
+        // 绝不能据此回待机 —— 否则动作刚起步就被掐掉，看起来像没播。
+        // 只有 ok=false（优先级被拒）才需要立刻收场。
+        if (!ok) {
+          api.log(`动作被拒（优先级不足）：${name}`)
+          backToIdle('被拒')
+        }
       }).catch(() => {})
     }
 
-    // 兜底：即使 Promise 没有按预期结束，也按时回到待机
-    if (!meta || !meta.loop) {
-      const wait = ((meta ? meta.duration : 3) + 0.6) * 1000
-      setTimeout(() => { if (token === motionToken) playIdle() }, wait)
-    }
+    // 兜底：不管文件里 Loop 写的是什么，到点一律拽回待机
+    setTimeout(() => backToIdle('时长到时'), dur * 1000)
+  }
+
+  /**
+   * 动作看门狗：万一还有别的路径把动作卡住（比如被拒后 currentPriority 没归零），
+   * 这里兜底把她拽回待机，而不是永远定在那一帧。
+   */
+  function motionWatchdog (now) {
+    if (!model || dragging) return
+    if (now < motionBusyUntil + 2500) return
+    try {
+      const mm = model.internalModel.motionManager
+      if (mm && mm.currentPriority > 0 && mm.currentGroup !== 'Idle') {
+        api.log(`动作看门狗：卡在「${mm.currentGroup}」（优先级 ${mm.currentPriority}），强制回待机`)
+        forceIdle('看门狗')
+      }
+    } catch { /* ignore */ }
+    motionBusyUntil = now + 4000
   }
 
   function randomMomentExpression () {
@@ -613,8 +662,14 @@
 
   function initSfx () {
     for (const n of SFX_NAMES) {
-      const a = new Audio(`pet://local/sfx/${n}.wav`)
+      const a = new Audio(`pet://local/sfx/${n}.mp3`)
       a.preload = 'auto'
+      // 仓库里默认是下载 + ffmpeg 处理过的 mp3。
+      // 如果你更想用纯合成的版本（tools/make-sfx.js 生成的是 wav），
+      // 把 mp3 删掉即可 —— 这里会自动退回 wav。
+      a.addEventListener('error', () => {
+        if (!/\.wav$/.test(a.src)) a.src = `pet://local/sfx/${n}.wav`
+      }, { once: true })
       sfxPool.set(n, a)
     }
     api.log(`音效已装载 ${SFX_NAMES.length} 个`)

@@ -200,24 +200,47 @@
 开关和音量在右键菜单 / 托盘菜单里：**🔊 互动音效** 勾选框 + **🔉 音效音量**（小/中/大，带「试听」）。
 音量默认 60%。连点摸头被静默吞掉时不会发声，所以不会刷屏。
 
-### 音效是程序合成的，不是网上下载的
+### 音效来源与处理
 
-`app/tools/make-sfx.js` 用振荡器 + 噪声 + 包络**现场合成**这 10 个音效，重新生成：
+10 个音效都来自 [Mixkit](https://mixkit.co/free-sound-effects/) 的免费音效库（[Mixkit Free License](https://mixkit.co/license/#sfxFree)）：
+
+| 音效 | Mixkit 素材 | 原长 → 裁剪 |
+| --- | --- | --- |
+| squeak | **Rubber duck squeak** | 0.67s → 0.62s |
+| happy | Funny Giggling | 2.09s → 1.40s |
+| nom | Chewing something crunchy | 0.94s → 0.89s |
+| boing | Boing hit sound | 1.24s → 0.95s |
+| splash | Water splash | 1.48s → 1.15s |
+| sparkle | Magic wand sparkle | 2.50s → 1.60s |
+| levelup | Achievement bell | 2.40s → 1.80s |
+| sleepy | Cartoon vocal yawn | 1.75s → 1.45s |
+| no | Cartoon failure piano | 2.31s → 1.00s |
+| wake | Cartoon toy whistle | 1.21s → 0.95s |
+
+重新下载并处理（需要 ffmpeg）：
+
+```powershell
+pwsh tools/fetch-sfx.ps1
+```
+
+处理链是：**去头静音 → 裁剪到适合桌宠的长度 → 压缩器压一下动态 → `loudnorm` 响度归一 → 尾淡出 → 单声道 22.05kHz / 96kbps mp3**。
+
+这里有个坑值得记：一开始我按**峰值**归一化，结果 10 个素材的**平均响度差了 18 dB**
+（`boing` −14 dB vs `nom` −32 dB），`nom` 会小到听不见。改成按**响度**归一，
+并且因为 `loudnorm` 单遍模式对这么短的音频不准（`nom` 差了 14 dB），又加了第二遍
+实测修正。最终 8 个精确落在 −20.5 dB，剩下两个是受 −1 dB 峰值上限保护的"尖端"素材。
+10 个合计 **147 KB**。
+
+### 想要纯合成版本？
+
+`app/tools/make-sfx.js` 还能用振荡器 + 噪声 + 包络**现场合成**一套（输出 wav）：
 
 ```bash
 cd app && npm run build:sfx
 ```
 
-这么做不是偷懒，是授权问题：本仓库是公开的 MIT，而绝大多数「免费音效站」的授权
-只允许你把音效**用在作品里**，**不允许把原始音频文件再分发**或做成素材库。
-下载来的 wav 塞进公开仓库属于踩线。程序合成的音效版权完全属于本项目，可以放心跟随 MIT 发布，
-而且 10 个加起来只有 **216 KB**。
-
-小黄鸭那个 squeak 的做法：音高先上滑再回落（660→1460→780 Hz）+ 30Hz 颤音 + 一点点起手气声，
-再叠一层三次谐波做出「橡胶」质感 —— 这就是捏橡皮鸭的招牌曲线。
-
-如果你更想用真实录音，把 wav 丢进 `app/sfx/` 覆盖同名文件即可（文件名见上表），
-但请自行确认那些素材的授权允许再分发。
+删掉 `app/sfx/*.mp3`，渲染层会在 mp3 加载失败时**自动退回 wav**，不需要改任何配置。
+（合成版的好处是版权完全归属本项目、不依赖任何外部素材；代价是真实录音的质感更好。）
 
 ---
 
@@ -306,7 +329,7 @@ deskpet/
 │  │  ├─ panel.js       状态面板
 │  │  └─ chat.js        聊天面板
 │  ├─ vendor/           live2dcubismcore + pixi + pixi-live2d-display
-│  ├─ sfx/              10 个程序合成的互动音效（wav，共 216 KB）
+│  ├─ sfx/              10 个互动音效（mp3，共 147 KB）
 │  ├─ model/            模型资源（moc3 / 贴图 / 物理 / 44 表情 / 8 动作）
 │  ├─ tools/
 │  │  ├─ make-model3.js   生成 model3.json
