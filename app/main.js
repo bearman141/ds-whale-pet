@@ -864,7 +864,7 @@ function makeMenuTemplate (extra = []) {
       click: () => fireAction({ kind: 'random-expression', target: '', label: '随机表情' }),
     },
     {
-      label: '↩️ 按键归位（清除表情）',
+      label: '↩️ 按键归位（表情 + 动作）',
       click: () => fireAction({ kind: 'reset', target: '', label: '按键归位' }),
     },
     { type: 'separator' },

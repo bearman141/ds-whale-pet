@@ -142,7 +142,7 @@ const HOTKEY_TABLE = [
   { combo: 'NumMul+5', kind: 'expression', target: '魔爪换色', label: '粉魔爪变白' },
 
   /* ---- 归位 ---- */
-  { combo: 'PageUp+PageDown', kind: 'reset', target: '', label: '按键归位（清空所有表情）' },
+  { combo: 'PageUp+PageDown', kind: 'reset', target: '', label: '按键归位（表情 + 动作一起复位）' },
 
   /* ---- 养成互动（Ctrl+Alt + 字母，避开原按键表） ---- */
   { combo: 'Ctrl+Alt+F', kind: 'action', target: 'feed', label: '🍚 喂食' },

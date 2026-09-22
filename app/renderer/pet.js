@@ -53,6 +53,22 @@
   const exprDefs = new Map()      // 表情名 -> 解析后的 exp3 内容
   const exprState = new Map()     // 表情名 -> { weight, removing, params, layer, expireAt }
   const motionMeta = new Map()    // 动作名 -> { duration, loop }
+  const motionParams = new Map()  // 动作名 -> 它驱动的参数 id 列表
+
+  /**
+   * 动作留下的「道具参数」要手动收，否则会永远挂在脸上。
+   *
+   * 实测：Idle 动作驱动的 89 个参数和所有动作**完全不重叠**（Idle 用
+   * Param73/maoshou* 那套，动作动的是 chuipaopao* / phone* / pengshui 这些）。
+   * 所以吹泡泡「播完」回待机之后，chuipaopao* 会停在最后一帧的值上 ——
+   * 泡泡就一直留在她脸上，换个角度看就是「动作没有归位」。
+   *
+   * clearedParams 里的参数每帧被强制写回模型初始值。
+   */
+  const clearedParams = new Set()
+  let defaultParams = null        // 参数 id -> 模型初始值
+  let idleParams = new Set()      // Idle 驱动的参数：这些不能强清，否则待机被冻住
+  let pendingProbe = null         // 归位后下一帧在帧内抽查一次参数值
 
   let dragging = false
   let dragMoved = 0
@@ -114,6 +130,8 @@
     createPixiApp()
     await loadModel(init.modelUrl)
     await Promise.all([loadExpressionDefs(), loadMotionMeta()])
+    // 放到这里：要等表情和动作的元数据都到位，才知道有哪些参数需要记初始值
+    captureDefaults()
 
     layout()
     startTicker()
@@ -163,9 +181,25 @@
     setTimeout(() => {
       try {
         const mm = model.internalModel.motionManager
-        api.log(`动作自检：currentGroup=${mm.currentGroup} currentIndex=${mm.currentIndex} ` +
-          `playing=${mm.isFinished ? !mm.isFinished() : 'n/a'} ` +
+        const vals = {}
+        for (const k of Object.keys(mm)) {
+          const v = mm[k]
+          if (v === null || ['string', 'number', 'boolean', 'undefined'].includes(typeof v)) vals[k] = v
+          else if (Array.isArray(v)) vals[k] = `[${v.length}]`
+          else if (v instanceof Map) vals[k] = `Map(${v.size})`
+          else vals[k] = typeof v
+        }
+        api.log(`动作自检：playing=${mm.playing} ` +
+          `stateGroup=${mm.state && mm.state.currentGroup} ` +
+          `statePriority=${mm.state && mm.state.currentPriority} ` +
           `groups=[${Object.keys(mm.motionGroups || {}).join(',')}]`)
+        const st = mm.state || {}
+        const sv = {}
+        for (const k of Object.keys(st)) {
+          const v = st[k]
+          sv[k] = (v === null || ['string', 'number', 'boolean', 'undefined'].includes(typeof v)) ? v : typeof v
+        }
+        api.log('state 字段: ' + JSON.stringify(sv))
       } catch (e) {
         api.log('动作自检失败: ' + e.message)
       }
@@ -209,6 +243,60 @@
     model.internalModel.on('beforeModelUpdate', applyExpressionStack)
   }
 
+  /**
+   * 记录「归位」要回到的目标值。
+   *
+   * 这里不去枚举模型全部参数（Cubism4 包装上没有 getParameterId），
+   * 而是只取表情和动作里出现过的那些 —— 需要复位的本来也就只有这些。
+   * 必须在 loadExpressionDefs / loadMotionMeta 之后、playIdle 之前调用。
+   */
+  function captureDefaults () {
+    try {
+      const core = model.internalModel.coreModel
+      const ids = new Set()
+      for (const list of motionParams.values()) for (const id of list) ids.add(id)
+      for (const def of exprDefs.values()) {
+        for (const p of def.Parameters || []) ids.add(p.Id)
+      }
+
+      const map = new Map()
+      for (const id of ids) {
+        try {
+          if (typeof core.getParameterIndex === 'function' && core.getParameterIndex(id) < 0) continue
+          map.set(id, core.getParameterValueById(id))
+        } catch { /* 参数不存在就跳过 */ }
+      }
+      defaultParams = map
+      api.log(`已记录 ${map.size} 个参数的初始值（归位基准）`)
+    } catch (e) {
+      api.log('记录参数初始值失败: ' + e.message)
+    }
+  }
+
+  /** 动作开始：先把它的参数从「强制归位」名单里放出来，让它能动 */
+  function releaseMotionParams (name) {
+    const ids = motionParams.get(name)
+    if (!ids || !ids.length) return
+    for (const id of ids) clearedParams.delete(id)
+  }
+
+  /** 动作收尾：把它留下的道具参数加进强制归位名单（Idle 会驱动的不动，免得打架） */
+  function clearMotionParams (name, quiet = false) {
+    if (!defaultParams) return 0
+    const ids = motionParams.get(name)
+    if (!ids || !ids.length) return 0
+    let n = 0
+    for (const id of ids) {
+      if (idleParams.has(id)) continue
+      if (!defaultParams.has(id)) continue
+      if (clearedParams.has(id)) continue
+      clearedParams.add(id)
+      n++
+    }
+    if (n && !quiet) api.log(`收尾归位：${name} 留下 ${n} 个参数`)
+    return n
+  }
+
   function safeCanvasSize (im) {
     try {
       const info = im.coreModel.getModel().canvasinfo
@@ -244,11 +332,20 @@
           duration: Number(json?.Meta?.Duration) || 3,
           loop: !!(json?.Meta?.Loop || m.loop),
         })
+        // 记下这个动作会动哪些参数，收尾时要按这份名单复位
+        motionParams.set(m.name, (json?.Curves || [])
+          .filter((c) => c.Target === 'Parameter' && c.Id)
+          .map((c) => c.Id))
       } catch (err) {
         motionMeta.set(m.name, { duration: 3, loop: !!m.loop })
+        motionParams.set(m.name, [])
         api.log(`动作元数据加载失败 ${m.name}（按 3 秒处理）: ${err.message}`)
       }
     }))
+
+    idleParams = new Set(motionParams.get('Idle') || [])
+    const owned = [...motionParams.keys()].filter((n) => n !== 'Idle').length
+    api.log(`动作参数表就绪：Idle 驱动 ${idleParams.size} 个参数，另有 ${owned} 个动作需要收尾`)
   }
 
   /* ============================================================ *
@@ -411,8 +508,28 @@
   }
 
   function applyExpressionStack () {
-    if (!exprState.size || !model) return
+    if (!model) return
     const core = model.internalModel.coreModel
+
+    // 动作留下的道具参数：每帧写回模型初始值，否则会永远挂在脸上。
+    // 注意这里是**帧内**、正好在 coreModel.update() 之前，所以写进去的值
+    // 就是这一帧真正拿去绘制（并交给物理/pose）的值。
+    // 帧末库会 loadParameters() 把「存档值」恢复回来，所以在帧外读参数
+    // 看到的仍是旧值 —— 别用帧外的读数量判断复位有没有生效。
+    if (clearedParams.size && defaultParams) {
+      for (const id of clearedParams) {
+        try { core.setParameterValueById(id, defaultParams.get(id)) } catch { /* ignore */ }
+      }
+      if (pendingProbe) {
+        const p = pendingProbe
+        pendingProbe = null
+        api.log('归位抽查（帧内 = 绘制用的值）' + p
+          .map((x) => `${x.id} ${x.before.toFixed(2)}→${core.getParameterValueById(x.id).toFixed(2)}`)
+          .join('   '))
+      }
+    }
+
+    if (!exprState.size) return
     for (const st of exprState.values()) {
       const w = st.weight
       if (w <= 0.001) continue
@@ -549,12 +666,28 @@
    * 才会归零。一旦有个动作卡住（比如模型里 Loop:true 的循环动作），
    * 之后连待机都起不来，她会永远定在那个动作上。
    */
+  /**
+   * 把 MotionManager 的优先级状态归零。
+   *
+   * 注意字段位置：currentPriority / currentGroup 和复位方法 complete()
+   * 都挂在 **mm.state** 上，不在 mm 本身。写成 mm.complete() 会被
+   * typeof 守卫静默跳过 —— 看起来没报错，实际优先级从没复位过。
+   */
+  function resetMotionState () {
+    try {
+      const mm = model && model.internalModel && model.internalModel.motionManager
+      if (!mm) return
+      const st = mm.state
+      if (st && typeof st.complete === 'function') st.complete()
+      else if (typeof mm.complete === 'function') mm.complete()
+    } catch (e) {
+      api.log('复位动作优先级失败: ' + e.message)
+    }
+  }
+
   function forceIdle (why) {
     if (!model) return
-    try {
-      const mm = model.internalModel.motionManager
-      if (mm && typeof mm.complete === 'function') mm.complete()
-    } catch { /* ignore */ }
+    resetMotionState()
     api.log(`回待机（${why}）`)
     playIdle()
   }
@@ -570,10 +703,14 @@
     const backToIdle = (why) => {
       if (returned || token !== motionToken) return
       returned = true
+      // 先把它留下的道具参数收干净，再回待机 —— 否则泡泡会一直挂着
+      clearMotionParams(name)
       forceIdle(`${name} ${why}`)
     }
     // 看门狗的时间基准：超过这个点还没回待机就说明卡了
     motionBusyUntil = performance.now() + dur * 1000
+
+    releaseMotionParams(name)
 
     let result
     try {
@@ -601,6 +738,65 @@
   }
 
   /**
+   * 停掉所有正在播的动作，并把它留下的道具参数收干净。
+   * 「归位」用这个 —— 光清表情是不够的，动作留下的泡泡/手机/喷水也得收。
+   */
+  function stopMotions ({ quiet = false } = {}) {
+    if (!model) return 0
+    motionToken++          // 让所有在途的收尾定时器失效
+    motionBusyUntil = 0
+
+    // 所有非 idle 动作留下的道具统统收掉（Idle 会驱动的参数会被跳过）
+    let added = 0
+    for (const name of motionParams.keys()) {
+      if (name !== 'Idle') added += clearMotionParams(name, true)
+    }
+
+    try {
+      const mm = model.internalModel.motionManager
+      if (mm && typeof mm.stopAllMotions === 'function') mm.stopAllMotions()
+    } catch (e) {
+      api.log('停止动作失败: ' + e.message)
+    }
+    resetMotionState()
+
+    if (!quiet && added) api.log(`停止动作：新收 ${added} 个道具参数`)
+    return added
+  }
+
+  /** 归位：表情清空 + 动作停止 + 道具参数复位 + 回待机 */
+  function resetAll ({ silent = false } = {}) {
+    // 抽查：优先盯「正在播的那个动作」的参数 —— 那才是真正需要复位的。
+    // 必须在停动作之前取值，否则读到的已经是复位后的了。
+    let probe = null
+    let wasPlaying = ''
+    try {
+      const core = model.internalModel.coreModel
+      const mm = model.internalModel.motionManager
+      wasPlaying = (mm && mm.state && mm.state.currentGroup) || ''
+      const own = wasPlaying && motionParams.get(wasPlaying)
+      const ids = (own && own.length ? own : [...clearedParams])
+        .filter((id) => !idleParams.has(id) && defaultParams && defaultParams.has(id))
+        .slice(0, 6)
+      if (ids.length) probe = ids.map((id) => ({ id, before: core.getParameterValueById(id) }))
+    } catch { /* ignore */ }
+
+    clearAllExpressions({ silent: true })
+    stopMotions({ quiet: true })
+    playIdle()
+
+    // 抽查放到下一帧的 beforeModelUpdate 里做：那里读到的才是绘制值
+    if (probe && probe.length) {
+      pendingProbe = probe
+      api.log(`归位抽查准备（原动作 ${wasPlaying || '无'}）`)
+    }
+
+    if (!silent) {
+      api.log(`按键归位：表情清空、动作停止、${clearedParams.size} 个道具参数复位`)
+    }
+  }
+
+  /**
    * 动作看门狗：万一还有别的路径把动作卡住（比如被拒后 currentPriority 没归零），
    * 这里兜底把她拽回待机，而不是永远定在那一帧。
    */
@@ -609,8 +805,9 @@
     if (now < motionBusyUntil + 2500) return
     try {
       const mm = model.internalModel.motionManager
-      if (mm && mm.currentPriority > 0 && mm.currentGroup !== 'Idle') {
-        api.log(`动作看门狗：卡在「${mm.currentGroup}」（优先级 ${mm.currentPriority}），强制回待机`)
+      const st = mm && mm.state
+      if (st && st.currentPriority > 0 && st.currentGroup && st.currentGroup !== 'Idle') {
+        api.log(`动作看门狗：卡在「${st.currentGroup}」（优先级 ${st.currentPriority}），强制回待机`)
         forceIdle('看门狗')
       }
     } catch { /* ignore */ }
@@ -740,8 +937,8 @@
     window.addEventListener('dblclick', (e) => {
       if (e.button !== 0) return
       if (isPanelTarget(e.target)) return
-      clearAllExpressions()
-      showBubble('手动加的表情都收起来啦～')
+      resetAll()
+      showBubble('表情和动作都收起来啦～')
     })
 
     window.addEventListener('contextmenu', (e) => {
@@ -791,8 +988,8 @@
           showBubble(`🎬 ${a.label || a.target}`)
           break
         case 'reset':
-          clearAllExpressions()
-          showBubble('↩️ 按键归位')
+          resetAll()
+          showBubble('↩️ 已归位')
           break
         case 'random-expression': {
           const n = randomMomentExpression()

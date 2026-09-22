@@ -250,7 +250,7 @@ cd app && npm run build:sfx
 | --- | --- |
 | **拖动** | 拖到任意位置，自动记住 |
 | **左键单击** | 摸摸头（心情 +4、好感 +1，有 3 秒冷却） |
-| **双击** | 收起手动加的表情（保留当前情绪对应的表情） |
+| **双击** | 收起表情和动作，回到素颜待机（等于「按键归位」） |
 | **滚轮** | 缩放大小 160–1000px，自动记住 |
 | **右键** | 打开菜单（照顾她 / 状态面板 / 表情 / 动作 / 各种开关） |
 | **托盘图标** | 同一个菜单 |
@@ -298,7 +298,7 @@ cd app && npm run build:sfx
 | `小键盘 .`+`4` / `5` / `6` | 自拍手机＆放下 / 自拍动画 / 快速自拍 |
 | `右Ctrl`+`PageUp` | 吹泡泡糖 |
 | `右Ctrl`+`Del` | 重锤出击 |
-| `PageUp`+`PageDown` | 按键归位 |
+| `PageUp`+`PageDown` | 按键归位（表情 + 动作一起复位） |
 
 </details>
 
@@ -424,10 +424,38 @@ Electron 文档只说 `forward` 在 `ignore: true` 时生效 —— 反过来说
 `SendInput` 明明返回 `2/2`，但第二次之后的点击会被系统路由到别处，换成 `focusable: true`
 或关掉穿透都一样。所以验证交互只能靠真鼠标或者让用户确认，别拿注入点击当真理。
 
-**6. 待机循环自己兜底**
+**6. 动作系统一共踩了四个坑（都是真机上报出来的）**
 
-`pixi-live2d-display` 播完一个高优先级动作后不会自动回到 idle，所以这里在动作结束后（Promise + 时长双保险）
-显式重新起 `Idle`。
+**① 模型里 8 个动作的 `Meta.Loop` 全是 `true`。**
+这套动作原本给 VTube Studio 用，那边靠 `DeactivateAfterKeyUp` 在**外部**控制时长，所以 Loop 不可信。
+而 `MotionManager` 里 IDLE 优先级在有动作在播时直接拒绝、NORMAL 也盖不过 NORMAL，
+只有「播完」才会把 `currentPriority` 归零 —— 循环动作永远不 complete，
+于是她卡在第一个播出去的动作上，之后连待机都起不来。
+`tools/make-model3.js` 会把 7 个动作改写成 `Loop:false`（idle 保持 true）。
+
+**② `model.motion()` 返回的 Promise 是「已开始」不是「已播完」。**
+实测 4~6ms 就 resolve(true)。按「播完」处理的话，每个动作刚起步就被自己掐掉。
+现在只信 `Meta.Duration` 定时器，Promise 只用来识别被拒（`ok === false`）。
+
+**③ 动作留下的「道具参数」没人收。**
+实测 Idle 驱动的 89 个参数和所有动作**完全不重叠**（Idle 用 `Param73`/`maoshou*` 那套，
+动作动的是 `chuipaopao*` / `phone*` / `pengshui`）。所以吹泡泡「播完」回待机之后，
+`chuipaopao*` 会停在最后一帧 —— **泡泡永远留在她脸上**。这就是「动作没有归位」的真相。
+
+修法：记下每个动作驱动哪些参数，动作结束时把 Idle 不碰的那些加进 `clearedParams`，
+在 `beforeModelUpdate` 里每帧写回模型初始值。归位（`PageUp`+`PageDown`）和双击会一次性收掉全部。
+
+> 测量这里有个陷阱：库的每帧顺序是
+> `motion.update → saveParameters → … → beforeModelUpdate → coreModel.update() → loadParameters()`。
+> 帧末的 `loadParameters()` 会把「存档值」恢复回来，所以**在帧外读参数看到的仍是旧值**。
+> 一开始我就是这么测的，误判成"没复位"。要看真实效果必须在 `beforeModelUpdate` 里读。
+
+**④ 库的字段藏在 `mm.state` 上。**
+`currentPriority` / `currentGroup` 和复位方法 `complete()` 都挂在 `mm.state`，
+不在 `mm` 本身。写成 `mm.complete()` 会被 `typeof` 守卫静默跳过 ——
+不报错，但优先级从没复位过。正确写法是 `mm.state.complete()`、`mm.stopAllMotions()`。
+
+另外加了个动作看门狗：超过预计时长还没回待机，就强制收尾，免得又卡死。
 
 ---
 
