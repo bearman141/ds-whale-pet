@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('petAPI', {
   setName: (name) => ipcRenderer.send('pet:set-name', String(name)),
   gameReset: () => ipcRenderer.send('pet:game-reset'),
   needFocus: (on) => ipcRenderer.send('pet:need-focus', !!on),
+  /** 光标是否在面板上（决定窗口要不要允许被激活） */
+  setPanelHover: (on) => ipcRenderer.send('pet:panel-hover', !!on),
   onGame: (fn) => ipcRenderer.on('pet:game', (_e, g) => fn(g)),
   onEvents: (fn) => ipcRenderer.on('pet:events', (_e, ev) => fn(ev)),
   onPanel: (fn) => ipcRenderer.on('pet:panel', (_e, p) => fn(p)),
@@ -41,5 +43,7 @@ contextBridge.exposeInMainWorld('petAPI', {
   onSize: (fn) => ipcRenderer.on('pet:size', (_e, h) => fn(h)),
   onPosition: (fn) => ipcRenderer.on('pet:position', (_e, p) => fn(p)),
   onWorkArea: (fn) => ipcRenderer.on('pet:workArea', (_e, wa) => fn(wa)),
+  /** 可交互期间主进程轮询来的真实光标位置（此时 mousemove 不再转发） */
+  onCursor: (fn) => ipcRenderer.on('pet:cursor', (_e, p) => fn(p)),
   onBubbleSetting: (fn) => ipcRenderer.on('pet:bubbleSetting', (_e, on) => fn(on)),
 })

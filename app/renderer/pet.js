@@ -343,22 +343,38 @@
   }
 
   function updateInteractive () {
-    if (!settings.clickThrough) return setInteractive(true)
-    if (dragging) return setInteractive(true)
-    // 面板是 DOM，读像素测不到，单独判一次矩形
-    if (panelCovers(pointer.x, pointer.y)) return setInteractive(true)
+    const p = pointer
+    const overPanel = panelCovers(p.x, p.y)
+    setPanelHover(overPanel)
+
+    if (!settings.clickThrough) return setInteractive(true, '关闭了像素穿透')
+    if (dragging) return setInteractive(true, '拖拽中')
+    if (overPanel) return setInteractive(true, '面板')
 
     const b = roughBox()
-    const p = pointer
     if (p.x < b.left || p.x > b.right || p.y < b.top || p.y > b.bottom) {
-      return setInteractive(false)
+      return setInteractive(false, '离开宠物与面板')
     }
-    setInteractive(alphaAt(p.x, p.y) > ALPHA_HIT_THRESHOLD)
+    const hit = alphaAt(p.x, p.y) > ALPHA_HIT_THRESHOLD
+    setInteractive(hit, hit ? '模型像素' : '模型透明处')
   }
 
-  function setInteractive (on) {
+  /**
+   * 通知主进程「光标在不在面板上」。
+   * 在面板上时窗口必须允许被激活，否则输入框拿不到键盘焦点。
+   */
+  let panelHoverNow = false
+  function setPanelHover (on) {
+    if (on === panelHoverNow) return
+    panelHoverNow = on
+    api.setPanelHover(on)
+  }
+
+  /** 记录每次穿透状态翻转的原因 —— 排查「面板点不动」全靠它 */
+  function setInteractive (on, why) {
     if (on === interactiveNow) return
     interactiveNow = on
+    api.log(`窗口可交互 ${on ? '开' : '关'}${why ? '（' + why + '）' : ''}`)
     api.setInteractive(on)
   }
 
@@ -608,7 +624,7 @@
       dragMoved = 0
       dragOffset.x = e.clientX - petX
       dragOffset.y = e.clientY - petY
-      setInteractive(true)
+      setInteractive(true, '按下')
     })
 
     const endDrag = () => {
@@ -734,6 +750,14 @@
       workArea = wa
       if (app) app.renderer.resize(window.innerWidth, window.innerHeight)
       layout()
+    })
+
+    /* 可交互期间 mousemove 不再转发，靠主进程轮询喂光标位置 */
+    api.onCursor((p) => {
+      if (!p || typeof p.x !== 'number') return
+      pointer.x = p.x
+      pointer.y = p.y
+      needHitTest = true
     })
 
     api.onBubbleSetting((on) => {

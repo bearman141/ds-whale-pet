@@ -241,6 +241,7 @@
   $('p-close').addEventListener('click', () => toggle(false))
   $('p-reset').addEventListener('click', () => api.gameReset())
 
+  nameInput.addEventListener('pointerdown', () => api.needFocus(true))
   nameInput.addEventListener('focus', () => {
     api.needFocus(true)
     nameInput.select()

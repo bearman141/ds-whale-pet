@@ -26,6 +26,8 @@
   let busy = false
   let streamEl = null
   let posTimer = null
+  let setupLogged = false
+  let lastFocusLogged = ''
 
   /* ------------------------------------------------------------ *
    * 显隐 / 定位
@@ -39,6 +41,7 @@
     if (visible) {
       window.PetView && window.PetView.relayout()
       if (!posTimer) posTimer = setInterval(() => window.PetView && window.PetView.relayout(), 400)
+      requestAnimationFrame(logGeometry)
       if (cfg && cfg.ready) inputEl.focus()
     } else {
       clearInterval(posTimer); posTimer = null
@@ -70,6 +73,22 @@
       ? `${cfg.model}${cfg.hasKey ? '' : '（无密钥）'}`
       : '未配置接口'
     window.PetView && window.PetView.relayout()
+
+    // 面板是 DOM，出问题时（点不到 / 打不了字）先得有坐标才能查
+    if (!cfg.ready && !setupLogged) setupLogged = true
+  }
+
+  /** 把当前可见的可点控件坐标写进日志，排查「点不到 / 打不了字」用 */
+  function logGeometry () {
+    const ids = ['c-text', 'c-send', 'c-base', 'c-model', 'c-key', 'c-extra', 'c-save', 'c-test']
+    const parts = []
+    for (const id of ids) {
+      const el = $(id)
+      if (!el || el.offsetParent === null) continue
+      const r = el.getBoundingClientRect()
+      parts.push(`#${id}@${Math.round(r.left + r.width / 2)},${Math.round(r.top + r.height / 2)}`)
+    }
+    if (parts.length) api.log('可点控件: ' + parts.join('  '))
   }
 
   function readForm () {
@@ -269,15 +288,34 @@
       send()
     }
   })
-  inputEl.addEventListener('focus', () => api.needFocus(true))
-  inputEl.addEventListener('blur', () => api.needFocus(false))
 
-  // 配置表单里也要能打字
-  for (const id of ['c-base', 'c-model', 'c-key', 'c-extra']) {
-    const el = $(id)
-    el.addEventListener('focus', () => api.needFocus(true))
-    el.addEventListener('blur', () => api.needFocus(false))
+  /**
+   * 打字前必须让窗口真的拿到系统键盘焦点 —— 窗口平时是 focusable:false
+   * （为了不抢你前台程序的焦点），Windows 会把按键送给前台窗口，
+   * 于是输入框看着有光标却打不进字。
+   *
+   * 用 pointerdown 而不是 focus：要在浏览器默认聚焦行为之前就把窗口变成
+   * 可激活的，不然这一次点击拿不到前台权限。
+   */
+  function wireInput (el) {
+    if (!el) return
+    el.addEventListener('pointerdown', () => api.needFocus(true))
+    el.addEventListener('focus', () => {
+      api.needFocus(true)
+      // 只在真正换了控件时记一行，避免 focus/blur 抖动刷屏
+      if (lastFocusLogged !== el.id) {
+        lastFocusLogged = el.id
+        api.log('输入框获得焦点: #' + el.id)
+      }
+    })
+    el.addEventListener('blur', () => {
+      if (lastFocusLogged === el.id) lastFocusLogged = ''
+      api.needFocus(false)
+    })
   }
+
+  wireInput(inputEl)
+  for (const id of ['c-base', 'c-model', 'c-key', 'c-extra']) wireInput($(id))
 
   /* ------------------------------------------------------------ *
    * 初始化

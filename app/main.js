@@ -215,7 +215,10 @@ function createWindow () {
   })
 
   win.setAlwaysOnTop(settings.alwaysOnTop, 'floating')
-  if (!has('noignore')) win.setIgnoreMouseEvents(true, { forward: true })
+  // 只在「按像素穿透」开启时才开始忽略鼠标；关掉时窗口本来就该一直可点。
+  // （以前无条件设 true，会导致启动时 clickThrough=false 的情况下永远收不到
+  //   鼠标移动，于是永远切不回来。）
+  if (settings.clickThrough) win.setIgnoreMouseEvents(true, { forward: true })
 
   win.once('ready-to-show', () => {
     win.showInactive()
@@ -269,6 +272,33 @@ function createWindow () {
 /* ------------------------------------------------------------------ *
  * 鼠标穿透
  * ------------------------------------------------------------------ */
+let cursorTimer = null
+
+/**
+ * 可交互期间主动轮询真实光标位置。
+ *
+ * 踩过的坑：setIgnoreMouseEvents(true, {forward:true}) 会转发 mousemove，
+ * 但一旦切成 false（可交互），Electron 就不再转发了 —— 渲染进程再也收不到
+ * mousemove，pointer 会**冻在进入时的位置**，于是它永远发现不了你已经离开面板，
+ * 窗口就卡在「可交互」状态，后续点击全落在错误的地方。
+ *
+ * screen.getCursorScreenPoint() 不受这个限制，用 60ms 轮询补上。
+ */
+function startCursorPoll () {
+  if (cursorTimer || !win || win.isDestroyed()) return
+  cursorTimer = setInterval(() => {
+    if (!win || win.isDestroyed() || !interactive) return
+    try {
+      const p = screen.getCursorScreenPoint()
+      win.webContents.send('pet:cursor', { x: p.x, y: p.y })
+    } catch { /* ignore */ }
+  }, 60)
+}
+
+function stopCursorPoll () {
+  if (cursorTimer) { clearInterval(cursorTimer); cursorTimer = null }
+}
+
 function setInteractive (on) {
   if (!win || win.isDestroyed()) return
   const next = settings.clickThrough ? !!on : true
@@ -276,9 +306,13 @@ function setInteractive (on) {
   interactive = next
   try {
     win.setIgnoreMouseEvents(!interactive, { forward: true })
+    log(`setIgnoreMouseEvents(${!interactive})  可交互=${interactive}`)
   } catch (e) {
     log('切换鼠标穿透失败:', e.message)
   }
+  // 可交互时 mousemove 不再转发，改用轮询喂坐标；不可交互时恢复转发
+  if (interactive) startCursorPoll()
+  else stopCursorPoll()
 }
 function hardResetInteraction () {
   interactive = false
@@ -958,7 +992,7 @@ function setupIpc () {
   ipcMain.on('pet:log', (_e, msg) => log('[pet]', msg))
 
   ipcMain.on('pet:interactive', (_e, on) => {
-    if (menuOpen) return
+    if (menuOpen) { log('忽略可交互请求：菜单正打开着'); return }
     setInteractive(on)
   })
 
@@ -987,16 +1021,71 @@ function setupIpc () {
   /* ---- 养成 ---- */
   ipcMain.on('pet:game-action', (_e, name) => gameAct(String(name || '')))
 
-  // 窗口平时是 focusable:false（不抢焦点、不进 Alt+Tab），
-  // 但重命名要打字，所以临时允许聚焦
+  /**
+   * 光标进入面板 —— 这是「面板里能打字」的关键。
+   *
+   * 窗口平时是 focusable:false（不抢前台焦点、不进 Alt+Tab）。但这样 Windows
+   * 不会把键盘焦点给它，输入框看着有光标却打不进字。
+   *
+   * 所以：光标一进面板就把窗口变成「可激活」，之后用户点输入框时由 Windows
+   * 自己完成激活 —— 这是最可靠的路子，比在 JS 里 setFocusable+focus 猜要稳。
+   * 光标离开且窗口没被聚焦时再恢复成不抢焦点。这样点宠物本身仍然不会抢焦点。
+   */
+  let panelHover = false
+  ipcMain.on('pet:panel-hover', (_e, on) => {
+    if (!win || win.isDestroyed()) return
+    const next = !!on
+    if (next === panelHover) return
+    panelHover = next
+    try {
+      if (next) {
+        win.setFocusable(true)
+        log('光标进入面板：窗口已允许被激活')
+      } else if (!win.isFocused()) {
+        win.setFocusable(false)
+        log('光标离开面板：窗口恢复为不抢焦点')
+      }
+    } catch (e) {
+      log('切换窗口可激活状态失败:', e.message)
+    }
+  })
+
+  // 兜底：输入框拿到 DOM 焦点后再主动要一次系统焦点（有些情况下点击不会
+  // 自动激活窗口，比如面板刚展开的那一下）。
+  //
+  // 注意这里必须「已经获得焦点就立刻返回」：否则 win.focus() 会让输入框
+  // 失焦又重获，focus 事件再触发一次 needFocus，滚成死循环。
+  let focusLoop = null
   ipcMain.on('pet:need-focus', (_e, on) => {
     if (!win || win.isDestroyed()) return
-    try {
-      win.setFocusable(!!on)
-      if (on) win.focus()
-    } catch (e) {
-      log('切换窗口可聚焦失败:', e.message)
+
+    if (!on) {
+      clearTimeout(focusLoop); focusLoop = null
+      if (!win.isFocused() && !panelHover) {
+        try { win.setFocusable(false) } catch { /* ignore */ }
+      }
+      return
     }
+
+    if (!win.isFocusable()) {
+      try { win.setFocusable(true) } catch (e) { log('setFocusable(true) 失败:', e.message) }
+    }
+    // 已经是焦点窗口就什么都别做，避免打断正在进行的输入
+    if (win.isFocused()) { clearTimeout(focusLoop); focusLoop = null; return }
+    if (focusLoop) return   // 已经有一轮在跑了
+
+    let tries = 0
+    const attempt = () => {
+      focusLoop = null
+      if (!win || win.isDestroyed() || win.isFocused()) return
+      if (++tries > 10) { log('文本输入：试了 10 次仍拿不到焦点'); return }
+      try {
+        win.focus()
+        win.webContents.focus()
+      } catch (e) { log('focus() 失败:', e.message) }
+      focusLoop = setTimeout(attempt, 60)
+    }
+    attempt()
   })
 
   ipcMain.on('pet:set-name', (_e, name) => {
