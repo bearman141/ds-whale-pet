@@ -15,16 +15,15 @@ contextBridge.exposeInMainWorld('petAPI', {
   quit: () => ipcRenderer.send('pet:quit'),
   log: (msg) => ipcRenderer.send('pet:log', String(msg)),
 
-  /* ---- 养成 ---- */
-  gameAction: (name) => ipcRenderer.send('pet:game-action', String(name)),
-  setName: (name) => ipcRenderer.send('pet:set-name', String(name)),
-  gameReset: () => ipcRenderer.send('pet:game-reset'),
+  /* ---- 输入联动 ---- */
   needFocus: (on) => ipcRenderer.send('pet:need-focus', !!on),
   /** 光标是否在面板上（决定窗口要不要允许被激活） */
   setPanelHover: (on) => ipcRenderer.send('pet:panel-hover', !!on),
-  onGame: (fn) => ipcRenderer.on('pet:game', (_e, g) => fn(g)),
+  /** 当前反应（跟随时机：打字/点击/空闲/回来…） */
+  onReact: (fn) => ipcRenderer.on('pet:react', (_e, r) => fn(r)),
+  /** 每一次按键的跟手节拍 */
+  onKeyPulse: (fn) => ipcRenderer.on('pet:keypulse', (_e, p) => fn(p)),
   onEvents: (fn) => ipcRenderer.on('pet:events', (_e, ev) => fn(ev)),
-  onPanel: (fn) => ipcRenderer.on('pet:panel', (_e, p) => fn(p)),
 
   /* ---- 聊天 ---- */
   chatInit: () => ipcRenderer.invoke('pet:chat-init'),

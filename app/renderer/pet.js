@@ -30,9 +30,7 @@
   const EXPR_FADE = 0.16           // 秒
   const CLICK_MOVE_TOLERANCE = 5   // px，超过算拖动
   const ALPHA_HIT_THRESHOLD = 12
-
-  /** 这些情绪说明「她有需求」，值得冒个气泡提醒你 */
-  const NEED_MOODS = new Set(['starving', 'hungry', 'exhausted', 'dirty', 'lonely', 'angry', 'sad'])
+  const KEYPULSE_TAU = 0.12        // 跟手脉冲的衰减时间常数（秒）
 
   /* ============================================================ *
    * 状态
@@ -98,7 +96,10 @@
   let motionToken = 0
   let motionBusyUntil = 0
   let lastFrame = performance.now()
-  let currentMood = null
+  let currentReact = null
+  let keyPulse = 0          // 每次按键叠加的跟手脉冲，会自然衰减
+  let pulseGain = 1
+  let pulseSeen = false
 
   const pixel = new Uint8Array(4)
 
@@ -109,7 +110,6 @@
   const bubble = document.getElementById('bubble')
   const bubbleText = document.getElementById('bubble-text')
   const hint = document.getElementById('hint')
-  const panelEl = document.getElementById('panel')
   const panelsEl = document.getElementById('panels')
   let bubbleTimer = null
 
@@ -160,7 +160,8 @@
     playIdle()
 
     // 养成系统：开局先把当前情绪的条件结果套上
-    if (init.game && init.game.snapshot) applyGameSnapshot(init.game.snapshot)
+    // 输入联动：开局先把主进程算出来的当前反应套上
+    if (init.react) applyReact(init.react)
 
     if (settings.showHint) {
       showHint()
@@ -441,7 +442,12 @@
     const rangeY = Math.max(110, petHeight * 0.7)
 
     const nx = clamp((pointer.x - cx) / rangeX, -1, 1)
-    const ny = clamp((cy - pointer.y) / rangeY, -1, 1)   // 屏幕 y 轴向下，取反
+    let ny = clamp((cy - pointer.y) / rangeY, -1, 1)   // 屏幕 y 轴向下，取反
+
+    // 你在打字的时候，她的目光会往下偏一点 —— 像是也在看你的键盘
+    if (currentReact && (currentReact.id === 'working' || currentReact.id === 'excited')) {
+      ny = clamp(ny - 0.45, -1, 1)
+    }
 
     // focusController 自带速度平滑，不需要我们再做插值
     fc.focus(nx, ny)
@@ -463,6 +469,10 @@
 
       tickExpressionStack(dt)
       motionWatchdog(now)
+
+      // 跟手脉冲自然衰减（指数衰减，时间常数 120ms）
+      if (keyPulse > 0.002) keyPulse *= Math.exp(-dt / KEYPULSE_TAU)
+      else keyPulse = 0
 
       if (needHitTest) {
         needHitTest = false
@@ -535,14 +545,14 @@
    * 表情叠加栈（分层）
    *
    * 三个来源往同一个池子里放表情，用层级决定优先级：
-   *   mood  情绪层 —— 养成引擎按条件实时推导，条件一变自动换
+   *   react 反应层 —— 输入联动引擎按你的键鼠活动实时推导，一变自动换
    *   prop  道具层 —— 热键手动开关（墨镜、桌布…），一直保留
-   *   event 事件层 —— 交互 / 点击的即时反应，带 TTL 自动淡出
+   *   event 事件层 —— 交互 / 点击 / 聊天回复的即时反应，带 TTL 自动淡出
    * 同名表情只保留层级最高的那个，高层不会被低层打断。
    *
    * 混合模式按原始 exp3 里的 Blend 走（基本都是 Add），所以多个表情能叠加。
    * ============================================================ */
-  const LAYER_RANK = { mood: 10, prop: 20, event: 30 }
+  const LAYER_RANK = { react: 10, prop: 20, event: 30 }
 
   function normalizeParams (def) {
     const core = model.internalModel.coreModel
@@ -582,6 +592,17 @@
       }
     }
 
+    // 跟手节拍：你每敲一下键，她轻轻点一下头。
+    // 这是这套「输入联动」里最像 BongoCat 的部分 —— 用 addParameterValueById
+    // 是「叠加」语义，不会覆盖视线跟随和物理算出来的值。
+    // 必须放在下面那个 early return 之前，否则没表情时就不抖了。
+    if (keyPulse > 0.002) {
+      try {
+        core.addParameterValueById('ParamAngleY', -keyPulse * 2.4)
+        core.addParameterValueById('ParamBodyAngleZ', keyPulse * 1.5)
+      } catch { /* ignore */ }
+    }
+
     if (!exprState.size) return
     for (const st of exprState.values()) {
       const w = st.weight
@@ -615,7 +636,7 @@
 
   /**
    * @param {string} name  表情名
-   * @param {'mood'|'prop'|'event'} layer
+   * @param {'react'|'prop'|'event'} layer
    * @param {number} ttl   毫秒，0 表示常驻
    */
   function addExpression (name, layer = 'prop', ttl = 0) {
@@ -660,35 +681,37 @@
   }
 
   /**
-   * 情绪层同步 —— 条件驱动表情的落地点。
-   * 养成引擎每次 tick 都会给出「当前情绪该配哪些表情」，
-   * 这里把情绪层替换成新集合，于是表情随条件自动变化。
+   * 反应层同步 —— 「表情随情况自动变」的落地点。
+   *
+   * 原来这里的输入是养成引擎推导的情绪（饿/困/心情差），
+   * 现在换成输入联动引擎推导的**反应**（在打字/被带嗨/犯困/你回来啦）。
+   * 机制没变：规则一变，就把这一层整体替换掉。
    */
-  let lastMoodKey = ''
-  function syncMoodLayer (list) {
+  let lastReactKey = ''
+  function syncReactLayer (list) {
     const want = new Set((list || []).filter((n) => exprDefs.has(n)))
     const key = [...want].sort().join('|')
-    if (key === lastMoodKey) return
-    lastMoodKey = key
+    if (key === lastReactKey) return
+    lastReactKey = key
 
     for (const [name, st] of [...exprState]) {
-      if (st.layer === 'mood' && !want.has(name)) removeExpression(name, 'mood')
+      if (st.layer === 'react' && !want.has(name)) removeExpression(name, 'react')
     }
     for (const n of want) {
       const st = exprState.get(n)
-      if (!st || st.layer === 'mood') addExpression(n, 'mood')
+      if (!st || st.layer === 'react') addExpression(n, 'react')
     }
-    api.log(`情绪表情 -> [${[...want].join(', ')}]`)
+    api.log(`反应表情 -> [${[...want].join(', ')}]`)
   }
 
-  /** 清掉手动加的东西，保留当前情绪（情绪是状态，不该被「归位」清掉） */
+  /** 清掉手动加的东西，保留当前反应层（反应是状态，不该被「归位」清掉） */
   function clearAllExpressions ({ silent = false } = {}) {
     for (const name of [...exprState.keys()]) {
       const st = exprState.get(name)
-      if (st.layer === 'mood') continue
+      if (st.layer === 'react') continue
       removeExpression(name, null, { silent: true })
     }
-    if (!silent) api.log('清空表情（保留当前情绪）')
+    if (!silent) api.log('清空表情（保留当前反应）')
   }
 
   function activeLabels () {
@@ -873,10 +896,15 @@
     return pool[Math.floor(Math.random() * pool.length)]
   }
 
-  /** 养成快照 -> 情绪层表情（条件驱动表情的入口） */
-  function applyGameSnapshot (snap) {
-    currentMood = snap.mood || null
-    syncMoodLayer(snap.mood ? snap.mood.expressions : [])
+  /**
+   * 应用一次「输入反应」（条件驱动表情的入口）。
+   * 引擎每次判定出的反应带哪些表情，就直接替换反应层。
+   */
+  function applyReact (r) {
+    if (!r) return
+    currentReact = r
+    pulseGain = typeof r.pulseGain === 'number' ? r.pulseGain : 1
+    syncReactLayer(r.expressions)
   }
 
   /* ============================================================ *
@@ -1019,7 +1047,7 @@
   }
 
   function isPanelTarget (t) {
-    return !!(t && t.closest && t.closest('#panel'))
+    return !!(t && t.closest && t.closest('#panels'))
   }
 
   /** 单击 = 摸摸头，交给养成引擎结算（心情/好感/经验 + 反应） */
@@ -1054,7 +1082,7 @@
       }
     })
 
-    /* 养成引擎事件：条件变化、交互反应、自主行为都从这里来 */
+    /* 主进程推来的表现指令（聊天回复、归位、音效…） */
     api.onEvents((events) => {
       for (const ev of events || []) {
         switch (ev.type) {
@@ -1070,20 +1098,25 @@
           case 'sound':
             playSfx(ev.name, ev.gain || 1)
             break
-          case 'mood':
-            api.log(`情绪变化 -> ${ev.emoji} ${ev.name}（${ev.reason}）`)
-            // 只有「有需求」的情绪才值得打断你
-            if (NEED_MOODS.has(ev.mood)) showBubble(`${ev.emoji} ${ev.name}`)
-            break
           default:
             break
         }
       }
     })
 
-    /* 养成引擎快照：情绪层表情由它驱动 */
-    api.onGame((g) => {
-      if (g && g.snapshot) applyGameSnapshot(g.snapshot)
+    /* 输入联动：当前反应 → 反应层表情 */
+    api.onReact((r) => {
+      if (!r) return
+      currentReact = r
+      pulseGain = typeof r.pulseGain === 'number' ? r.pulseGain : 1
+      syncReactLayer(r.expressions)
+    })
+
+    /* 每一次按键的跟手节拍：累加一个脉冲，渲染时衰减成一下轻微点头 */
+    api.onKeyPulse((p) => {
+      if (!p) return
+      if (!pulseSeen) { pulseSeen = true; api.log(`跟手脉冲已收到（gain=${p.gain}）`) }
+      keyPulse = Math.min(3, keyPulse + (p.gain || 1))
     })
 
     api.onSize((h) => {

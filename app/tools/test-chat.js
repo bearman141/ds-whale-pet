@@ -58,25 +58,41 @@ ok(threw, '空地址抛错')
 
 /* ------------------------------------------------------------------ */
 section('提示词')
-const snap = {
-  name: '小鲸鱼', level: 4, title: '朋友', uptimeHours: 30,
-  affection: 63.4,
-  stats: { satiety: 18, mood: 30, energy: 77, clean: 88 },
-  mood: { emoji: '🍚', name: '肚子饿了', reason: '饱食度低于 28' },
+// 养成砍掉之后，这里喂的是 inputContext()：{ name, reaction, activity }
+const ctx = {
+  name: '小鲸鱼',
+  reaction: { id: 'excited', name: '被你带嗨了', emoji: '🤩', reason: '你打字快得飞起（≥ 5 键/秒）' },
+  activity: { keysPerSec: 6.4, clicksRecent: 0, wheelRecent: 0, idleSeconds: 1, hour: 15, lateNight: false },
 }
-const sp = buildSystemPrompt(snap, { emotions: ['开心兴奋', '星星眼'], motions: ['自拍'], extra: '说话再随便一点' })
+const sp = buildSystemPrompt(ctx, { emotions: ['开心兴奋', '星星眼'], motions: ['自拍'], extra: '说话再随便一点' })
 
 ok(sp.includes('小鲸鱼'), '提示词带上名字')
-ok(sp.includes('Lv.4') && sp.includes('朋友'), '带上等级和称号')
-ok(sp.includes('饱食度 18/100'), '带上饱食度', sp.match(/饱食度[^\n]*/)?.[0])
-ok(sp.includes('好感度 63/100'), '带上好感度')
-ok(sp.includes('肚子饿了') && sp.includes('饱食度低于 28'), '带上当前情绪和原因')
+ok(sp.includes('正在飞快地敲键盘'), '把你的键鼠活动翻译成了人话', sp.match(/用户此刻在做什么[^\n]*/)?.[0])
+ok(sp.includes('6.4 键/秒'), '带上打字速度')
+ok(sp.includes('被你带嗨了') && sp.includes('你打字快得飞起'), '带上当前反应和原因')
 ok(sp.includes('开心兴奋') && sp.includes('星星眼'), '只列出给定的表情白名单')
 ok(!sp.includes('魔爪'), '没把道具类表情写进去')
 ok(sp.includes('自拍'), '带上动作白名单')
 ok(sp.includes('说话再随便一点'), '带上用户补充人设')
 ok(/\[表情:xxx\]\[动作:xxx\]/.test(sp), '明确给出输出格式')
-ok(buildSystemPrompt(null).includes('鲸鱼娘'), '快照为空时不炸，用默认名字')
+ok(buildSystemPrompt(null).includes('鲸鱼娘'), '上下文为空时不炸，用默认名字')
+
+// 空闲场景要能翻译对
+const idleSp = buildSystemPrompt({
+  name: 'x',
+  reaction: { emoji: '😪', name: '犯困', reason: '有点安静' },
+  activity: { keysPerSec: 0, clicksRecent: 0, wheelRecent: 0, idleSeconds: 900, hour: 3, lateNight: true },
+})
+ok(idleSp.includes('十分钟没碰电脑'), '空闲十分钟能说出来', idleSp.match(/用户此刻在做什么[^\n]*/)?.[0])
+ok(idleSp.includes('凌晨'), '凌晨时段正确')
+ok(!idleSp.includes('正在打字'), '没输入时不会瞎说你在打字')
+
+// 连点鼠标
+const clickSp = buildSystemPrompt({
+  name: 'x', reaction: { emoji: '👆', name: '被戳了', reason: '你在点鼠标' },
+  activity: { keysPerSec: 0, clicksRecent: 5, wheelRecent: 0, idleSeconds: 0, hour: 15 },
+})
+ok(clickSp.includes('连续点鼠标'), '连点鼠标能说出来')
 
 section('时段')
 eq(periodOfDay(3), '凌晨', '3 点')

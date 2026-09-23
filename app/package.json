@@ -9,7 +9,7 @@
     "build:model": "node tools/make-model3.js",
     "build:sfx": "node tools/make-sfx.js",
     "fetch:sfx": "pwsh -NoProfile -File ../tools/fetch-sfx.ps1",
-    "test": "node tools/test-game.js && node tools/test-chat.js",
+    "test": "node tools/test-input.js && node tools/test-chat.js",
     "pack": "electron-builder --win --x64"
   },
   "author": "桌宠外壳打包（模型：B站 @氵六青）",

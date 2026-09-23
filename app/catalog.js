@@ -144,14 +144,7 @@ const HOTKEY_TABLE = [
   /* ---- 归位 ---- */
   { combo: 'PageUp+PageDown', kind: 'reset', target: '', label: '按键归位（表情 + 动作一起复位）' },
 
-  /* ---- 养成互动（Ctrl+Alt + 字母，避开原按键表） ---- */
-  { combo: 'Ctrl+Alt+F', kind: 'action', target: 'feed', label: '🍚 喂食' },
-  { combo: 'Ctrl+Alt+P', kind: 'action', target: 'play', label: '🎾 玩耍' },
-  { combo: 'Ctrl+Alt+M', kind: 'action', target: 'pet', label: '🤚 摸摸头' },
-  { combo: 'Ctrl+Alt+C', kind: 'action', target: 'clean', label: '🛁 洗澡' },
-  { combo: 'Ctrl+Alt+G', kind: 'action', target: 'gift', label: '🎁 送礼物' },
-  { combo: 'Ctrl+Alt+S', kind: 'action', target: 'sleep', label: '💤 睡觉 / 叫醒' },
-  { combo: 'Ctrl+Alt+T', kind: 'action', target: 'panel', label: '📊 状态面板' },
+  /* ---- 聊天面板（Ctrl+Alt + 字母，避开原按键表） ---- */
   { combo: 'Ctrl+Alt+L', kind: 'action', target: 'chat', label: '💬 和她聊天' },
 ]
 

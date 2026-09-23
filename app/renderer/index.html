@@ -17,50 +17,13 @@
   <div id="hint" class="hidden">
     <b>你好呀，我是 DS鲸鱼娘 🐋</b>
     <span>拖动我换位置 · 左键摸摸头 · 右键打开菜单 · 双击收起表情和动作</span>
-    <span>右键菜单 →「🐋 照顾她」喂饭、玩耍、洗澡、送礼、哄睡</span>
+    <span>你打字、点鼠标、滚页面，我都会跟着动 —— 试试快速敲一串字</span>
     <span>「💬 和她聊天」可以接自己的大模型 API 跟我说话</span>
-    <span class="dim">Ctrl+Alt+T 状态面板 ｜ Ctrl+Alt+L 聊天 ｜ 模型作者：B站 @氵六青</span>
+    <span class="dim">Ctrl+Alt+L 聊天 ｜ 模型作者：B站 @氵六青</span>
   </div>
 
-  <!-- ============ 面板区（两个面板并排，整体贴着宠物） ============ -->
+  <!-- ============ 面板区（贴着宠物，目前只有一个聊天面板） ============ -->
   <div id="panels">
-
-    <!-- 状态面板 -->
-    <div id="panel" class="card hidden">
-      <div class="p-head">
-        <span class="p-emoji" id="p-emoji">🐋</span>
-        <div class="p-title">
-          <input id="p-name" maxlength="12" spellcheck="false" autocomplete="off">
-          <div class="p-sub"><span id="p-level">Lv.1</span> · <span id="p-title-text">陌生的鲸</span></div>
-        </div>
-        <button id="p-close" title="关闭面板">×</button>
-      </div>
-
-      <div class="p-moodrow">
-        <div class="p-mood" id="p-mood-name">发呆</div>
-        <div class="p-reason" id="p-reason">——</div>
-      </div>
-
-      <div class="p-bars" id="p-bars"></div>
-
-      <div class="p-sep"></div>
-
-      <div class="p-line"><span>❤️ 好感度</span><span id="p-aff-val">0.0 / 100</span></div>
-      <div class="p-bar aff"><i id="p-aff-fill"></i></div>
-
-      <div class="p-line"><span id="p-exp-label">EXP 0 / 20</span><span id="p-ach">🏆 0</span></div>
-      <div class="p-bar exp"><i id="p-exp-fill"></i></div>
-
-      <div class="p-actions" id="p-actions"></div>
-
-      <div class="p-logtitle">最近发生</div>
-      <ul class="p-log" id="p-log"></ul>
-
-      <div class="p-foot">
-        <span id="p-uptime">相处 0 小时</span>
-        <button id="p-reset">重新领养</button>
-      </div>
-    </div>
 
     <!-- 聊天面板 -->
     <div id="chat" class="card hidden">
@@ -122,7 +85,6 @@
   <script src="pet://local/vendor/pixi.min.js"></script>
   <script src="pet://local/vendor/pixi-live2d-display.cubism4.min.js"></script>
   <script src="pet://local/renderer/pet.js"></script>
-  <script src="pet://local/renderer/panel.js"></script>
   <script src="pet://local/renderer/chat.js"></script>
 </body>
 </html>

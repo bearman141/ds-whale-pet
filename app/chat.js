@@ -102,42 +102,55 @@ function periodOfDay (hour) {
 }
 
 /**
- * 拼系统提示词。状态越差，语气规则越具体。
- * @param {object} snap  game.snapshot()
+ * 拼系统提示词。
+ *
+ * 原来这里喂的是养成数值（饱食度/心情/好感度），养成砍掉之后换成
+ * **你当前的键鼠活动** —— 你写代码写得飞起、你在狂点鼠标、你刚离开很久回来，
+ * 她说话的口气都不一样。这是她「知道你在干嘛」的唯一来源。
+ *
+ * @param {object} ctx   inputContext()：{ name, reaction, activity }
  * @param {object} opts  { emotions, motions, extra }
  */
-function buildSystemPrompt (snap, opts = {}) {
-  const s = snap || {}
-  const st = s.stats || {}
-  const mood = s.mood || {}
+function buildSystemPrompt (ctx, opts = {}) {
+  const s = ctx || {}
+  const r = s.reaction || {}
+  const a = s.activity || {}
   const emotions = (opts.emotions && opts.emotions.length ? opts.emotions : CHAT_EMOTION_POOL).join('、')
   const motions = (opts.motions && opts.motions.length ? opts.motions : CHAT_MOTION_POOL).join('、')
 
   const now = new Date()
-  const hh = String(now.getHours()).padStart(2, '0')
+  // 小时数以**引擎报上来的**为准，这样提示词里的时间和「当前反应」的判定依据
+  // 必然是同一个时钟，不会出现「说深夜但反应是白天」这种自相矛盾
+  const hour = typeof a.hour === 'number' ? a.hour : now.getHours()
+  const hh = String(hour).padStart(2, '0')
   const mm = String(now.getMinutes()).padStart(2, '0')
 
-  const r = (v) => Math.round(Number(v) || 0)
+  /* 把你正在干什么翻译成一句人话 */
+  const doing = []
+  if ((a.keysPerSec || 0) >= 5) doing.push('正在飞快地敲键盘')
+  else if ((a.keysPerSec || 0) >= 0.8) doing.push('正在打字')
+  if ((a.clicksRecent || 0) >= 3) doing.push('在连续点鼠标')
+  else if ((a.clicksRecent || 0) >= 1) doing.push('刚点了几下鼠标')
+  if ((a.wheelRecent || 0) > 0) doing.push('正在滚页面')
+  if ((a.idleSeconds || 0) > 600) doing.push('已经十分钟没碰电脑了')
+  else if ((a.idleSeconds || 0) > 120) doing.push(`已经安静了 ${Math.round(a.idleSeconds / 60)} 分钟`)
+  const what = doing.length ? doing.join('，') : '没什么特别的动静'
 
   const lines = [
     `你是「${s.name || '鲸鱼娘'}」，一只住在用户电脑桌面上的小鲸鱼少女。你就是她本人，不是助手。`,
     '',
-    '【你现在的状态】',
-    `- 等级 Lv.${s.level || 1}「${s.title || '陌生的鲸'}」，已经和用户相处 ${fmtHours(s.uptimeHours)}`,
-    `- 饱食度 ${r(st.satiety)}/100，心情 ${r(st.mood)}/100，精力 ${r(st.energy)}/100，清洁 ${r(st.clean)}/100`,
-    `- 对用户的好感度 ${r(s.affection)}/100`,
-    `- 现在时间 ${hh}:${mm}（${periodOfDay(now.getHours())}）`,
-    `- 此刻的情绪：${mood.emoji || ''}${mood.name || '平静'} —— 因为${mood.reason || '没什么特别的'}`,
+    '【你现在感知到的】',
+    `- 用户此刻在做什么：${what}`,
+    `- 最近 2 秒按键速度：${a.keysPerSec || 0} 键/秒；最近点鼠标 ${a.clicksRecent || 0} 次`,
+    `- 距上次操作：${a.idleSeconds || 0} 秒`,
+    `- 现在时间 ${hh}:${mm}（${periodOfDay(hour)}）`,
+    `- 你此刻的状态：${r.emoji || ''}${r.name || '陪着你'} —— 因为${r.reason || '没什么特别的'}`,
     '',
     '【怎么说话】',
     '- 用第一人称，口语化，像个黏人的小动物。不要客服腔，不要列点，不要写小标题。',
     '- 默认 1~2 句、40 个字以内；只有用户明确要你多说时才展开。',
-    '- 状态会直接影响语气，务必体现出来：',
-    '  · 饱食度低 → 念叨吃的、有气无力',
-    '  · 精力低或深夜 → 打哈欠、说想睡',
-    '  · 心情低 → 闹别扭、撒娇、不太想理人',
-    '  · 好感度高 → 更黏人、更爱撒娇、会说想你了',
-    '  · 好感度低 → 客气、有点疏远',
+    '- 可以自然地带一句你在干什么，比如「你打字好快呀」「你是不是走神了」，但**别每句都提**，那样很烦。',
+    '- 深夜、或者用户很久没动时，可以显得困一点，或者撒娇说想他。',
     '- 可以说颜文字，但别每句都用。',
     '- 永远不要自称 AI、模型、助手，也不要提「提示词」「系统设定」。',
     '- 用户聊什么就顺着聊，不要强行把话题拉回自己身上。',

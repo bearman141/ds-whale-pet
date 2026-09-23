@@ -11,13 +11,13 @@
 
 const {
   app, BrowserWindow, Tray, Menu, ipcMain, protocol, net,
-  screen, nativeImage, globalShortcut, shell, dialog,
+  screen, nativeImage, globalShortcut, shell,
 } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { pathToFileURL } = require('url')
 const { buildCatalog } = require('./catalog')
-const { Game, STAT_META, STAT_KEYS, titleFor, ACTIONS } = require('./game')
+const { InputTracker } = require('./input')
 const {
   normalizeConfig, configReady, maskKey, buildSystemPrompt, parseReply,
   requestChat, buildMessages, CHAT_EMOTION_POOL, CHAT_MOTION_POOL,
@@ -33,7 +33,6 @@ const ASSET_ICON = path.join(APP_DIR, 'assets', 'icon.png')
 
 app.setPath('userData', path.join(app.getPath('appData'), 'DSWhalePet'))
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json')
-const STATE_FILE = path.join(app.getPath('userData'), 'pet-state.json')
 const CHAT_FILE = path.join(app.getPath('userData'), 'chat.json')
 const HISTORY_FILE = path.join(app.getPath('userData'), 'chat-history.json')
 const LOG_FILE = path.join(app.getPath('userData'), 'pet.log')
@@ -88,6 +87,7 @@ const DEFAULT_SETTINGS = {
   showHint: true,       // 首次运行提示
   sfx: true,            // 互动音效
   sfxVolume: 0.6,       // 0..1
+  inputReact: true,     // 跟随你的键鼠操作做反应
 }
 
 function loadSettings () {
@@ -248,9 +248,13 @@ function createWindow () {
   win.webContents.on('console-message', (_e, level, message, line, sourceId) => {
     log(`[renderer:${level}] ${message} (${sourceId}:${line})`)
   })
-  // 页面就绪后补推一次养成快照（启动时的那次 tick 早于渲染进程订阅）
+  // 页面就绪后补推一次输入状态（启动时那次早于渲染进程订阅）
   win.webContents.on('did-finish-load', () => {
-    setTimeout(() => { sendGame() }, 400)
+    setTimeout(() => {
+      if (!input || !win || win.isDestroyed()) return
+      const { rule } = input.evaluate()
+      sendReact(reactPayload(rule, { stats: input.snapshot() }))
+    }, 400)
 
     // 调试：DSHPET_CHAT_PROBE="你好" 时自动发一条，用来验证聊天链路
     if (process.env.DSHPET_CHAT_PROBE) {
@@ -460,6 +464,24 @@ function startUiohook () {
   }
   log(`按键映射就绪：${keyTokenByCode.size} 个键码（其中 ${extAdded} 个是扩展位形式）`)
 
+  /* ---- 输入联动：喂给追踪器 ---- */
+  // 注意这两件事是解耦的：热键关了，输入联动照样要工作（反过来也是）。
+  uIOhook.on('keydown', () => {
+    const now = Date.now()
+    if (input) { input.key(now); sendKeyPulse(now) }
+  })
+  uIOhook.on('mousedown', () => { if (input) input.click(Date.now()) })
+  uIOhook.on('wheel', () => { if (input) input.wheel(Date.now()) })
+  // mousemove 的频率可以到 1000Hz，不能每个都喂 —— 250ms 采一次足够判断「人还在不在」
+  let lastMoveSeen = 0
+  uIOhook.on('mousemove', () => {
+    const now = Date.now()
+    if (!input || now - lastMoveSeen < 250) return
+    lastMoveSeen = now
+    input.move(now)
+  })
+
+  /* ---- 全局热键：只在开关打开时匹配 ---- */
   uIOhook.on('keydown', (e) => {
     if (!settings.hotkeys) return
     if (process.env.DSHPET_KEYDEBUG) {
@@ -481,10 +503,10 @@ function startUiohook () {
   try {
     uIOhook.start()
     hookStarted = true
-    log('全局键盘钩子已启动，热键数量:', hotkeyIndex.size)
+    log(`全局钩子已启动：热键 ${hotkeyIndex.size} 个｜输入联动 ${settings.inputReact ? '开' : '关'}`)
     return true
   } catch (e) {
-    log('启动全局键盘钩子失败:', e.message)
+    log('启动全局钩子失败:', e.message)
     return false
   }
 }
@@ -542,17 +564,22 @@ function stopHotkeys () {
 function startHotkeys () {
   stopHotkeys()
   buildHotkeyIndex()
-  if (!settings.hotkeys) { log('热键已关闭'); return }
-  if (!startUiohook()) startGlobalShortcuts()
+
+  // 热键和输入联动是两件事，只要有一个开着就需要这个全局钩子
+  if (!settings.hotkeys && !settings.inputReact) {
+    log('热键与输入联动都已关闭，不装全局钩子')
+    return
+  }
+  if (!startUiohook() && settings.hotkeys) startGlobalShortcuts()
 }
 
 /** 把一个动作发给渲染进程执行 */
 function fireAction (action) {
   if (!win || win.isDestroyed()) return
-  // 养成互动在主进程直接结算，不需要绕渲染进程
-  if (action.kind === 'action') {
-    log('触发:', action.label || action.target)
-    gameAct(action.target)
+  // 面板开关类在主进程直接处理，不必绕渲染进程转发
+  if (action.kind === 'action' && action.target === 'chat') {
+    log('触发:', action.label || '聊天面板')
+    win.webContents.send('pet:chatpanel', { toggle: true })
     return
   }
   log('触发:', action.label, action.combo ? `(${action.combo})` : '')
@@ -564,106 +591,112 @@ function fireAction (action) {
 }
 
 /* ================================================================== *
- * 养成系统
+ * 输入联动（参考 BongoCat 的思路）
  *
- * 引擎（game.js）是纯逻辑，这里只负责：定时 tick、持久化、
- * 把事件翻译成渲染指令、以及把快照推给状态面板。
+ * 跟着你真实的键鼠操作做反应：猛敲键盘她会兴奋、连点鼠标她盯着你、
+ * 滚轮她跟着动、安静太久她会犯困甚至睡着、你离开一阵再回来她会打招呼。
+ *
+ * 引擎（input.js）是纯逻辑，这里只负责：把 uiohook 的原始事件喂给它、
+ * 定时推导当前反应并推给渲染进程、转发每次按键的「跟手节拍」。
  * ================================================================== */
-let game = null
-let gameSaveTimer = null
-let gameTimer = null
+let input = null
+let inputTimer = null
+let lastPulseSent = 0
+let lastBubbleAt = 0
 
-const TICK_MS = 20000
+const INPUT_TICK_MS = 500
+const PULSE_MIN_GAP_MS = 28        // 跟手节拍最多 ~35 次/秒：够跟手，又不刷爆 IPC
+const BUBBLE_MIN_GAP_MS = 4000     // 台词之间至少隔 4 秒，免得状态来回抖就刷屏
 
-function loadGame () {
-  try {
-    const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))
-    game = Game.load(raw)
-    log('读取养成存档：', `Lv.${game.s.level}「${titleFor(game.s.level)}」 已相处 ${((Date.now() - game.s.birth) / 3600000).toFixed(1)} 小时`)
-  } catch (e) {
-    game = new Game()
-    if (e.code !== 'ENOENT') log('养成存档损坏，已重置：', e.message)
-    else log('未找到养成存档，创建新档')
+function sendReact (payload) {
+  if (!win || win.isDestroyed()) return
+  win.webContents.send('pet:react', payload)
+}
+
+function reactPayload (rule, extra = {}) {
+  return {
+    id: rule.id,
+    name: rule.name,
+    emoji: rule.emoji,
+    reason: rule.reason,
+    expressions: rule.expressions,
+    pulseGain: rule.pulse,
+    bubble: null,
+    sfx: null,
+    ...extra,
   }
 }
 
-function saveGame (immediate = false) {
-  if (!game) return
-  clearTimeout(gameSaveTimer)
-  const write = () => {
-    try {
-      fs.writeFileSync(STATE_FILE, JSON.stringify(game.serialize(), null, 2))
-    } catch (e) {
-      log('保存养成存档失败:', e.message)
-    }
-  }
-  if (immediate) write()
-  else gameSaveTimer = setTimeout(write, 400)
+function inputTick () {
+  if (!input) return
+  const { rule, stats, changed } = input.evaluate()
+  if (!changed) return
+
+  const now = Date.now()
+  const greet = input.greeting()
+  const allowBubble = now - lastBubbleAt > BUBBLE_MIN_GAP_MS
+  if (allowBubble && greet.text) lastBubbleAt = now
+
+  log(`输入反应 -> ${rule.emoji} ${rule.name}（${rule.reason}）` +
+    `｜${stats.keysPerSec} 键/秒, 空闲 ${stats.idleSeconds}s`)
+
+  sendReact(reactPayload(rule, {
+    bubble: allowBubble ? greet.text : null,
+    sfx: greet.sfx,
+    stats,
+  }))
 }
 
-function sendGame () {
-  if (!win || win.isDestroyed() || !game) return
-  win.webContents.send('pet:game', {
-    snapshot: game.snapshot(),
-    statMeta: STAT_META,
-    statKeys: STAT_KEYS,
-  })
+function startInputLoop () {
+  input = new InputTracker()
+  const { rule } = input.evaluate()
+  sendReact(reactPayload(rule, { stats: input.snapshot() }))
+  clearInterval(inputTimer)
+  inputTimer = setInterval(inputTick, INPUT_TICK_MS)
+  log(`输入联动已启动（每 ${INPUT_TICK_MS} ms 评估一次）`)
 }
 
-/** 把引擎事件翻译成渲染指令；log 类同时落进面板事件流 */
-function dispatchEvents (events) {
+/** 每次按键的跟手节拍：渲染层会把它衰减成一下轻微的点头 */
+function sendKeyPulse (now) {
+  if (!settings.inputReact || !input) return
+  if (!win || win.isDestroyed()) return
+  if (now - lastPulseSent < PULSE_MIN_GAP_MS) return
+  lastPulseSent = now
+  win.webContents.send('pet:keypulse', { gain: input.pulseGain() })
+}
+
+/** 把表现指令转给渲染进程（原来这个函数还兼着写养成日志，现在只做转发） */
+function sendEvents (events) {
   if (!events || !events.length) return
-  if (!game || !win || win.isDestroyed()) return
-  for (const ev of events) {
-    if (ev.type === 'log') game.pushLog(ev.icon, ev.text)
-  }
+  if (!win || win.isDestroyed()) return
   win.webContents.send('pet:events', events)
 }
 
-function gameTick () {
-  if (!game) return
-  const { events } = game.tick()
-  dispatchEvents(events)
-  saveGame()
-  sendGame()
-}
-
-function startGameLoop () {
-  loadGame()
-  gameTick()
-  clearInterval(gameTimer)
-  gameTimer = setInterval(gameTick, TICK_MS)
-  log(`养成循环已启动（每 ${TICK_MS / 1000} 秒一跳）`)
-}
-
-/** 执行一次养成互动 */
-function gameAct (name) {
-  if (!game) return { ok: false, reason: '养成系统还没就绪' }
-
-  // 这两个不是互动，只是开面板
-  if (name === 'panel') {
-    win?.webContents.send('pet:panel', { toggle: true })
-    return { ok: true }
+/** 给聊天用的输入上下文（原来这里喂的是养成数值） */
+function inputContext () {
+  if (!input) return null
+  const s = input.snapshot()
+  const r = input.reaction
+  return {
+    name: '鲸鱼娘',
+    reaction: { id: r.id, name: r.name, emoji: r.emoji, reason: r.reason },
+    activity: {
+      keysPerSec: s.keysPerSec,
+      clicksRecent: s.clicksRecent,
+      wheelRecent: s.wheelRecent,
+      idleSeconds: s.idleSeconds,
+      hour: s.hour,
+      lateNight: s.lateNight,
+    },
   }
-  if (name === 'chat') {
-    win?.webContents.send('pet:chatpanel', { toggle: true })
-    return { ok: true }
-  }
-
-  const res = game.act(name)
-  if (!res.ok && !/再等等/.test(res.reason || '')) log('互动被拒:', name, res.reason)
-  dispatchEvents(res.events)
-  saveGame(true)
-  sendGame()
-  return res
 }
 
 /* ================================================================== *
  * 聊天（OpenAI 兼容接口）
  *
  * 关键点：
- *  - 提示词里会塞进她当前的养成状态，所以同样一句话，
- *    饿的时候和吃饱的时候口气不一样
+ *  - 提示词里会塞进**你当前的键鼠活动**（在猛敲键盘？在连点？离开很久了？），
+ *    所以同样一句话，你写代码写得飞起时和她安静发呆时，口气不一样
  *  - 让她在回复开头带 [表情:xxx][动作:xxx]，解析出来后
  *    直接喂给渲染进程的分层表情栈 —— 聊天内容能驱动表情和动作
  *  - 走 Electron 的 net.fetch 而不是 Node 的 fetch，
@@ -757,17 +790,17 @@ async function chatSend (text) {
   chatTo('pet:chat-message', { role: 'user', content: say })
 
   // 思考中的小表现
-  dispatchEvents([
+  sendEvents([
     { type: 'expression', target: '呆呆眼', ttl: 4000, layer: 'event' },
   ])
 
   try {
-    const snap = game ? game.snapshot() : null
+    const ctx = inputContext()
     const allowed = (pool, have) => pool.filter((n) => !have || have.has(n))
     const emotions = allowed(CHAT_EMOTION_POOL, catalog.expressionNames)
     const motions = allowed(CHAT_MOTION_POOL, catalog.motionNames)
 
-    const system = buildSystemPrompt(snap, { emotions, motions, extra: chatConfig.systemExtra })
+    const system = buildSystemPrompt(ctx, { emotions, motions, extra: chatConfig.systemExtra })
     const messages = buildMessages(system, chatHistory.slice(0, -1), say, chatConfig.historyLimit)
 
     const raw = await requestChat(chatConfig, messages, {
@@ -780,11 +813,6 @@ async function chatSend (text) {
     if (chatHistory.length > 200) chatHistory = chatHistory.slice(-200)
     saveChatHistory()
 
-    // 聊天也算陪伴：涨好感 / 心情 / 经验
-    const res = game ? game.noteChat() : null
-    if (res && res.events.length) dispatchEvents(res.events)
-    if (res) { saveGame(true); sendGame() }
-
     // 她的回复反过来驱动表情和动作
     const evs = []
     if (parsed.emotion && (!catalog.expressionNames || catalog.expressionNames.has(parsed.emotion))) {
@@ -796,7 +824,7 @@ async function chatSend (text) {
     if (parsed.text && parsed.text.length <= 70) {
       evs.push({ type: 'bubble', text: parsed.text, ms: 3600 })
     }
-    if (evs.length) dispatchEvents(evs)
+    if (evs.length) sendEvents(evs)
 
     log('聊天回复:', parsed.emotion ? `[${parsed.emotion}]` : '', parsed.text.slice(0, 60))
     chatTo('pet:chat-reply', { ok: true, text: parsed.text, emotion: parsed.emotion, motion: parsed.motion })
@@ -804,7 +832,7 @@ async function chatSend (text) {
   } catch (e) {
     const msg = String((e && e.message) || e)
     log('聊天失败:', msg)
-    dispatchEvents([
+    sendEvents([
       { type: 'bubble', text: '呜……我脑子卡住了' },
       { type: 'expression', target: '晕晕', ttl: 5000, layer: 'event' },
     ])
@@ -851,53 +879,26 @@ function makeMenuTemplate (extra = []) {
   }))
   sizeItems.push({ type: 'separator' }, { label: '（也可在宠物上滚滚轮）', enabled: false })
 
-  /* ---- 养成：照顾她 ---- */
-  const s = game ? game.s : null
-  const careItems = []
-  if (s) {
-    careItems.push(
-      {
-        label: `${game.mood ? game.mood.emoji : '🐋'} Lv.${s.level}「${titleFor(s.level)}」· ${game.mood ? game.mood.name : ''}`,
-        enabled: false,
-      },
+  /* ---- 当前输入状态（原来这里是养成数值） ---- */
+  const reactItems = []
+  if (input) {
+    const st = input.snapshot()
+    const r = input.reaction
+    reactItems.push(
+      { label: `${r.emoji} ${r.name} —— ${r.reason}`, enabled: false },
       { type: 'separator' },
-    )
-    for (const key of ['feed', 'play', 'pet', 'clean', 'gift', 'sleep']) {
-      const a = ACTIONS[key]
-      if (!a) continue
-      const can = game.canDo(key)
-      const cd = Math.ceil(Math.max(0, (s.cooldowns[key] || 0) - Date.now()) / 1000)
-      careItems.push({
-        label: `${a.icon} ${a.label}${can.ok ? '' : `　（${cd > 0 ? cd + 's' : can.reason}）`}`,
-        enabled: can.ok,
-        click: () => gameAct(key),
-      })
-    }
-    careItems.push(
-      { type: 'separator' },
-      {
-        label: `🍚 饱食 ${Math.round(s.stats.satiety)}　💗 心情 ${Math.round(s.stats.mood)}`,
-        enabled: false,
-      },
-      {
-        label: `⚡ 精力 ${Math.round(s.stats.energy)}　🫧 清洁 ${Math.round(s.stats.clean)}`,
-        enabled: false,
-      },
-      { label: `❤️ 好感 ${s.affection.toFixed(1)} / 100`, enabled: false },
+      { label: `⌨️ 打字 ${st.keysPerSec} 键/秒　👆 点击 ${st.clicksRecent} 次`, enabled: false },
+      { label: `🕐 距上次操作 ${st.idleSeconds} 秒`, enabled: false },
     )
   } else {
-    careItems.push({ label: '养成系统未就绪', enabled: false })
+    reactItems.push({ label: '输入联动未就绪', enabled: false })
   }
 
   return [
     ...extra,
     { type: 'separator' },
-    { label: '🐋 照顾她', submenu: careItems },
+    { label: '👀 她在干什么', submenu: reactItems },
     { label: '💬 和她聊天', click: () => win?.webContents.send('pet:chatpanel', { toggle: true }) },
-    {
-      label: '📊 状态面板',
-      click: () => win?.webContents.send('pet:panel', { toggle: true }),
-    },
     { type: 'separator' },
     { label: '😊 表情', submenu: exprItems },
     { label: '🎬 动作', submenu: motionItems },
@@ -930,6 +931,12 @@ function makeMenuTemplate (extra = []) {
       type: 'checkbox',
       checked: settings.hotkeys,
       click: (mi) => applySetting('hotkeys', mi.checked),
+    },
+    {
+      label: '👀 跟随我的键鼠（输入联动）',
+      type: 'checkbox',
+      checked: settings.inputReact,
+      click: (mi) => applySetting('inputReact', mi.checked),
     },
     {
       label: '💬 触发气泡',
@@ -1007,6 +1014,16 @@ function applySetting (key, value) {
     case 'hotkeys':
       startHotkeys()
       break
+    case 'inputReact':
+      // 关掉时立刻退回默认状态，免得她停在「被你带嗨了」那种表情上
+      if (!value) {
+        sendReact({
+          id: 'idle', name: '陪着你', emoji: '🐋', reason: '输入联动已关闭',
+          expressions: [], pulseGain: 0.7, bubble: null, sfx: null,
+        })
+      }
+      startHotkeys()      // 钩子可能因为两个开关都关着而没装，重开
+      break
     case 'bubble':
       win?.webContents.send('pet:bubbleSetting', !!value)
       break
@@ -1065,8 +1082,9 @@ function openReadme () {
 function quitApp () {
   log('退出')
   stopHotkeys()
-  clearInterval(gameTimer)
-  saveGame(true)
+  clearInterval(inputTimer)
+  clearInterval(topWatch)
+  clearInterval(cursorTimer)
   try { tray?.destroy() } catch { /* ignore */ }
   app.exit(0)
 }
@@ -1103,9 +1121,6 @@ function setupIpc () {
   })
 
   ipcMain.on('pet:quit', () => quitApp())
-
-  /* ---- 养成 ---- */
-  ipcMain.on('pet:game-action', (_e, name) => gameAct(String(name || '')))
 
   /**
    * 光标进入面板 —— 这是「面板里能打字」的关键。
@@ -1174,40 +1189,6 @@ function setupIpc () {
     attempt()
   })
 
-  ipcMain.on('pet:set-name', (_e, name) => {
-    if (!game) return
-    const n = String(name || '').trim().slice(0, 12)
-    if (!n) return
-    game.s.name = n
-    saveGame(true)
-    sendGame()
-    log('改名 ->', n)
-  })
-
-  ipcMain.on('pet:game-reset', async () => {
-    if (!game) return
-    withMenuFocus(() => {})
-    const { response } = await dialog.showMessageBox({
-      type: 'warning',
-      buttons: ['取消', '重新领养'],
-      defaultId: 0,
-      cancelId: 0,
-      title: '重新领养',
-      message: '要重新领养一只吗？',
-      detail: `当前进度（Lv.${game.s.level}「${titleFor(game.s.level)}」、好感 ${game.s.affection.toFixed(1)}）会被清空，且无法恢复。`,
-    })
-    if (response !== 1) return
-    game = new Game()
-    saveGame(true)
-    sendGame()
-    dispatchEvents([
-      { type: 'log', icon: '🐋', text: '重新领养了一只小鲸鱼' },
-      { type: 'bubble', text: '你好呀，初次见面！' },
-      { type: 'expression', target: '开心兴奋', ttl: 5000, layer: 'event' },
-    ])
-    log('已重新领养')
-  })
-
   /* ---- 聊天 ---- */
   ipcMain.handle('pet:chat-init', () => ({
     config: chatPublicConfig(),
@@ -1265,7 +1246,9 @@ function setupIpc () {
       petHeight: settings.height || SIZE_PRESETS[settings.size] || SIZE_PRESETS.medium,
       position: petPosition(),
       workArea: workArea(),
-      game: game ? { snapshot: game.snapshot(), statMeta: STAT_META, statKeys: STAT_KEYS } : null,
+      react: input
+        ? (() => { const r = input.reaction; return reactPayload(r, { stats: input.snapshot() }) })()
+        : null,
     }
   })
 }
@@ -1315,8 +1298,8 @@ if (!app.requestSingleInstanceLock()) {
     }
 
     loadChat()
+    startInputLoop()
     startHotkeys()
-    startGameLoop()
     startCursorPoll()
     startAlwaysOnTopWatch()
 
