@@ -739,15 +739,51 @@ function startShotScript () {
  * 它只验证这一段，不验证全局钩子 —— 钩子得靠真人按键或用 DSHPET_INPUTDEBUG 看。
  */
 function startFakeKeys () {
-  const keys = String(process.env.DSHPET_FAKEKEYS).split(',').map((s) => s.trim()).filter(Boolean)
+  let spec = String(process.env.DSHPET_FAKEKEYS)
+  // 末尾可以用 @毫秒 指定速度：DSHPET_FAKEKEYS="A,B,C@125" 就是 8 键/秒
+  let interval = 2500
+  const at = spec.lastIndexOf('@')
+  if (at >= 0) {
+    const n = Number(spec.slice(at + 1))
+    if (n > 0) interval = n
+    spec = spec.slice(0, at)
+  }
+  const keys = spec.split(',').map((s) => s.trim()).filter(Boolean)
   if (!keys.length) return
   let i = 0
-  log(`假按键已开启：${keys.join(' ')}（每 2.5 秒一个）`)
+  log(`假按键已开启：${keys.join(' ')}（每 ${interval} ms 一个）`)
   setInterval(() => {
     const k = keys[i % keys.length]
     i++
     sendKeyPulse(Date.now(), k === '_' ? null : k)
-  }, 2500)
+  }, interval)
+}
+
+/**
+ * 整页抓图（DSHPET_PAGESHOT=settings|chat）
+ *
+ * 和 DSHPET_SHOT 的区别：那个走渲染层的 gl.readPixels，只能拍到 WebGL 里的模型，
+ * 拍不到 HTML 面板。这个走 webContents.capturePage()，DOM 和 canvas 一起拍，
+ * 用来检查面板排版有没有崩、控件有没有跑出卡片。
+ */
+function startPageShot () {
+  const which = process.env.DSHPET_PAGESHOT
+  if (!which) return
+  shotDir = process.env.DSHPET_SHOT_DIR || path.join(__dirname, '..', 'shots')
+  try { fs.mkdirSync(shotDir, { recursive: true }) } catch { /* ignore */ }
+  setTimeout(() => {
+    if (!win || win.isDestroyed()) return
+    win.webContents.send(which === 'chat' ? 'pet:chatpanel' : 'pet:settings-panel', { toggle: true })
+    setTimeout(async () => {
+      try {
+        const img = await win.webContents.capturePage()
+        fs.writeFileSync(path.join(shotDir, `page-${which}.png`), img.toPNG())
+        log(`[shot] page-${which}.png`)
+      } catch (e) {
+        log('[shot] capturePage 失败:', e.message)
+      }
+    }, 1500)
+  }, 5000)
 }
 
 /** 每次按键的跟手节拍。
@@ -981,25 +1017,26 @@ function makeMenuTemplate (extra = []) {
   }))
   sizeItems.push({ type: 'separator' }, { label: '（也可在宠物上滚滚轮）', enabled: false })
 
-  /* ---- 当前输入状态（原来这里是养成数值） ---- */
-  const reactItems = []
+  /* ---- 当前输入状态 ----
+   * 直接摆在一级菜单上。
+   * 这些数字（尤其打字速度）原来藏在「👀 她在干什么」这个二级菜单里 ——
+   * 那等于没人看得见：想知道自己敲多快，谁会先展开两层菜单。
+   * 二级菜单留着放「选择类」的东西（表情 / 动作 / 大小），
+   * 「设置类」的开关全部搬进三级窗口「其他设置」。 */
+  const status = []
   if (input) {
     const st = input.snapshot()
     const r = input.reaction
-    reactItems.push(
-      { label: `${r.emoji} ${r.name} —— ${r.reason}`, enabled: false },
+    status.push(
+      { label: `${r.emoji} ${r.name}`, enabled: false },
+      { label: `⌨️ ${st.keysPerSec} 键/秒　👆 ${st.clicksRecent} 次　🕐 隔 ${st.idleSeconds} 秒`, enabled: false },
       { type: 'separator' },
-      { label: `⌨️ 打字 ${st.keysPerSec} 键/秒　👆 点击 ${st.clicksRecent} 次`, enabled: false },
-      { label: `🕐 距上次操作 ${st.idleSeconds} 秒`, enabled: false },
     )
-  } else {
-    reactItems.push({ label: '输入联动未就绪', enabled: false })
   }
 
   return [
     ...extra,
-    { type: 'separator' },
-    { label: '👀 她在干什么', submenu: reactItems },
+    ...status,
     { label: '💬 和她聊天', click: () => win?.webContents.send('pet:chatpanel', { toggle: true }) },
     { type: 'separator' },
     { label: '😊 表情', submenu: exprItems },
@@ -1012,69 +1049,12 @@ function makeMenuTemplate (extra = []) {
       label: '↩️ 按键归位（表情 + 动作）',
       click: () => fireAction({ kind: 'reset', target: '', label: '按键归位' }),
     },
-    { type: 'separator' },
     { label: '📏 大小', submenu: sizeItems },
-    { label: '🎯 回到右下角', click: () => resetPosition() },
     { type: 'separator' },
     {
-      label: '📌 总在最前',
-      type: 'checkbox',
-      checked: settings.alwaysOnTop,
-      click: (mi) => applySetting('alwaysOnTop', mi.checked),
+      label: '⚙️ 其他设置…',
+      click: () => win?.webContents.send('pet:settings-panel', { toggle: true }),
     },
-    {
-      label: '🖱️ 按像素穿透（只点模型）',
-      type: 'checkbox',
-      checked: settings.clickThrough,
-      click: (mi) => applySetting('clickThrough', mi.checked),
-    },
-    {
-      label: '⌨️ 全局热键',
-      type: 'checkbox',
-      checked: settings.hotkeys,
-      click: (mi) => applySetting('hotkeys', mi.checked),
-    },
-    {
-      label: '👀 跟随我的键鼠（输入联动）',
-      type: 'checkbox',
-      checked: settings.inputReact,
-      click: (mi) => applySetting('inputReact', mi.checked),
-    },
-    {
-      label: '💬 触发气泡',
-      type: 'checkbox',
-      checked: settings.bubble,
-      click: (mi) => applySetting('bubble', mi.checked),
-    },
-    {
-      label: '🔊 互动音效',
-      type: 'checkbox',
-      checked: settings.sfx,
-      click: (mi) => applySetting('sfx', mi.checked),
-    },
-    {
-      label: '🔉 音效音量',
-      submenu: [
-        { label: '小', type: 'radio', checked: settings.sfxVolume <= 0.35, click: () => applySetting('sfxVolume', 0.3) },
-        { label: '中', type: 'radio', checked: settings.sfxVolume > 0.35 && settings.sfxVolume <= 0.8, click: () => applySetting('sfxVolume', 0.6) },
-        { label: '大', type: 'radio', checked: settings.sfxVolume > 0.8, click: () => applySetting('sfxVolume', 1) },
-        { type: 'separator' },
-        { label: '▶ 试听', click: () => win?.webContents.send('pet:sfx-test', {}) },
-      ],
-    },
-    { type: 'separator' },
-    {
-      label: '🚀 开机自动启动',
-      type: 'checkbox',
-      checked: isAutoLaunchOn(),
-      click: (mi) => {
-        setAutoLaunch(mi.checked)
-        refreshTray()
-      },
-    },
-    { label: '📖 按键表 / 说明', click: () => openReadme() },
-    { label: '🗂️ 打开模型文件夹', click: () => shell.openPath(MODEL_DIR) },
-    { type: 'separator' },
     { label: '❌ 退出', click: () => quitApp() },
   ]
 }
@@ -1136,7 +1116,29 @@ function applySetting (key, value) {
     default:
       break
   }
+  // 「其他设置」面板要是开着，让它跟着同步（有些开关别处也会改）
+  win?.webContents.send('pet:settings-changed', settingsView())
   refreshTray()
+}
+
+/**
+ * 三级窗口「其他设置」要的一份快照。
+ *
+ * 这个窗口不是原生菜单 —— 原生菜单做不了音量滑条，也没法写说明文字，
+ * 所以设置类的东西统一收进这个 HTML 面板，右键菜单里只留一个入口。
+ */
+function settingsView () {
+  return {
+    alwaysOnTop: !!settings.alwaysOnTop,
+    clickThrough: !!settings.clickThrough,
+    inputReact: !!settings.inputReact,
+    hotkeys: !!settings.hotkeys,
+    bubble: !!settings.bubble,
+    sfx: !!settings.sfx,
+    sfxVolume: settings.sfxVolume == null ? 0.6 : settings.sfxVolume,
+    autoLaunch: isAutoLaunchOn(),
+    size: settings.size || 'custom',
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -1196,6 +1198,32 @@ function quitApp () {
  * ================================================================== */
 function setupIpc () {
   ipcMain.on('pet:log', (_e, msg) => log('[pet]', msg))
+
+  /* ---- 三级窗口「其他设置」 ---- */
+  ipcMain.handle('pet:settings-get', () => settingsView())
+
+  ipcMain.on('pet:settings-set', (_e, p) => {
+    if (!p || !p.key) return
+    // 开机自启走的是系统快捷方式，不在 settings.json 里，单独处理
+    if (p.key === 'autoLaunch') {
+      setAutoLaunch(!!p.value)
+      win?.webContents.send('pet:settings-changed', settingsView())
+      refreshTray()
+      return
+    }
+    applySetting(p.key, p.value)
+  })
+
+  ipcMain.on('pet:settings-do', (_e, p) => {
+    switch (p && p.what) {
+      case 'reset-position': resetPosition(); break
+      case 'open-model-dir': shell.openPath(MODEL_DIR); break
+      case 'open-readme': openReadme(); break
+      case 'sfx-test': win?.webContents.send('pet:sfx-test', {}); break
+      case 'reset': fireAction({ kind: 'reset', target: '', label: '按键归位' }); break
+      default: break
+    }
+  })
 
   // 调试抓图：渲染层把 dataURL 发上来，这里落盘成 png。
   // 放在主进程写，是因为渲染层没有（也不该有）任意路径的写权限。
@@ -1421,6 +1449,7 @@ if (!app.requestSingleInstanceLock()) {
     startAlwaysOnTopWatch()
     if (process.env.DSHPET_DEMO) startDemoLoop()
     startShotScript()
+    startPageShot()
     if (process.env.DSHPET_FAKEKEYS) startFakeKeys()
 
     screen.on('display-metrics-changed', () => {

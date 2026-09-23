@@ -30,7 +30,15 @@
   const EXPR_FADE = 0.16           // 秒
   const CLICK_MOVE_TOLERANCE = 5   // px，超过算拖动
   const ALPHA_HIT_THRESHOLD = 12
-  const KEYPULSE_TAU = 0.15        // 跟手脉冲的衰减时间常数（秒）
+
+  /* 打字跟手：连续振荡 + 能量包络（详见 ticker 里的说明） */
+  const BOB_ENERGY_PER_KEY = 0.16  // 每按一键加多少能量
+  const BOB_DECAY_TAU = 0.55       // 能量衰减时间常数（秒）
+  const BOB_SMOOTH_TAU = 0.09      // 幅度低通 —— 治「鬼畜」的关键就是这一个
+  const BOB_HZ_MIN = 1.5           // 轻轻敲时的点头频率
+  const BOB_HZ_MAX = 2.6           // 敲得飞起时
+  const BOB_HEAD_DEG = 5.5         // 满幅时的头部俯仰
+  const BOB_BODY_DEG = 3.8         // 满幅时的身体侧摆
 
   /* ============================================================ *
    * 状态
@@ -97,7 +105,15 @@
   let motionBusyUntil = 0
   let lastFrame = performance.now()
   let currentReact = null
-  let keyPulse = 0          // 每次按键叠加的跟手脉冲，会自然衰减
+  let bobEnergy = 0         // 0..1，每按一键抬一点，然后平滑衰减
+  let bobPhase = 0          // 振荡相位（弧度）
+  let bobAmp = 0            // 低通之后的实际幅度
+  // 平滑度指标（只在 DSHPET_INPUTDEBUG 下用）：跟手动作每秒的最大单帧变化。
+  // 「鬼畜」就是这个数太大 —— 旧实现每按一键直接跳 5.5°。
+  const inputDebug = !!(window.petAPI && window.petAPI.inputDebug)
+  let bobLastV = 0
+  let bobMaxDelta = 0
+  let bobReportAt = 0
   const debugParams = new Map()   // 仅调试用：抓图脚本临时压住的参数
 
   /* ---------------------------------------------------------------- *
@@ -115,8 +131,8 @@
    * ---------------------------------------------------------------- */
   const BOARD_PEN_HOLD_MS = 1200   // 停手之后笔还亮多久
   const BOARD_FLASH_MS = 700       // 回车 / 橡皮亮多久
-  const BOARD_PRESS_MS = 180       // 跟手的「手按下」
-  const board = { penUntil: 0, returnUntil: 0, eraseUntil: 0, pressUntil: 0 }
+  const BOARD_PRESS_MS = 190       // 跟手的「手按下」一个来回
+  const board = { penUntil: 0, returnUntil: 0, eraseUntil: 0, pressAt: 0 }
   let boardDirty = false
   let boardLogTag = ''
 
@@ -129,7 +145,15 @@
     } else {
       board.penUntil = now + BOARD_PEN_HOLD_MS
     }
-    board.pressUntil = now + BOARD_PRESS_MS
+    board.pressAt = now
+  }
+
+  /** 手按下：半个正弦包络（平滑起、平滑落），不是 0/1 硬切 */
+  function pressEnvelope (now) {
+    if (!board.pressAt) return 0
+    const e = now - board.pressAt
+    if (e < 0 || e >= BOARD_PRESS_MS) { board.pressAt = 0; return 0 }
+    return Math.sin((Math.PI * e) / BOARD_PRESS_MS)
   }
   let pulseSeen = false
 
@@ -502,9 +526,37 @@
       tickExpressionStack(dt)
       motionWatchdog(now)
 
-      // 跟手脉冲自然衰减（指数衰减，时间常数 120ms）
-      if (keyPulse > 0.002) keyPulse *= Math.exp(-dt / KEYPULSE_TAU)
-      else keyPulse = 0
+      // 打字跟手：能量 → 低通 → 推动一个连续振荡。
+      //
+      // 关键：**不要**每按一键就朝角度砸一个脉冲。那样每一次按键都是一个阶跃，
+      // 高频打字时变成一格一格的抽搐 —— 用户原话是「跟鬼畜一样」。
+      // 现在按键只改变「能量」，角度完全由相位连续推出来，
+      // 帧间变化从 5.5°/帧 降到 2°/帧 左右，看着就是她在跟着你的节奏点头。
+      bobEnergy *= Math.exp(-dt / BOB_DECAY_TAU)
+      if (bobEnergy < 0.001) bobEnergy = 0
+      bobAmp += (bobEnergy - bobAmp) * (1 - Math.exp(-dt / BOB_SMOOTH_TAU))
+      if (bobAmp > 0.004) {
+        // 用限幅过的 dt 推相位：掉帧时如果按真实 dt 推，相位会一次跳很远，
+        // 看起来就是「抖一下」。宁可这一帧慢一点，也不要那种突跳。
+        const bdt = Math.min(dt, 0.04)
+        bobPhase += bdt * Math.PI * 2 * (BOB_HZ_MIN + (BOB_HZ_MAX - BOB_HZ_MIN) * bobAmp)
+      } else {
+        bobAmp = 0
+        bobPhase = 0        // 归零，下一轮打字从 sin(0)=0 平滑起步
+      }
+
+      if (inputDebug) {
+        const v = Math.sin(bobPhase) * bobAmp * BOB_HEAD_DEG
+        const d = Math.abs(v - bobLastV)
+        if (d > bobMaxDelta) bobMaxDelta = d
+        bobLastV = v
+        if (now - bobReportAt > 1000) {
+          bobReportAt = now
+          api.log(`跟手平滑度：最大单帧变化 ${bobMaxDelta.toFixed(2)}°` +
+            `（当前幅度 ${(bobAmp * BOB_HEAD_DEG).toFixed(1)}°）`)
+          bobMaxDelta = 0
+        }
+      }
 
       if (needHitTest) {
         needHitTest = false
@@ -624,18 +676,12 @@
       }
     }
 
-    // 跟手节拍：你每敲一下键，她点一下头。
-    // 这是整套「输入联动」里最像 BongoCat 的部分 —— 用 addParameterValueById
-    // 是「叠加」语义，不会覆盖视线跟随和物理算出来的值。
-    // 必须放在下面那个 early return 之前，否则没表情时就不抖了。
-    //
-    // 幅度调过两轮：2.4°/1.5° → 5.0°/3.0° → 现在 5.5°/4.5°。
-    // 前两轮用户都反馈「根本看不出来」，所以别怕做重：连打时上限 2.6 × 4.5° ≈ 12°，
-    // 一眼就能看见她在跟着你的手速点头，单次轻敲也还有约 4°。
-    if (keyPulse > 0.002) {
+    // 跟手点头：由上面的连续相位推出来，不做任何阶跃
+    if (bobAmp > 0.004) {
+      const s = Math.sin(bobPhase)
       try {
-        core.addParameterValueById('ParamAngleY', -keyPulse * 5.5)
-        core.addParameterValueById('ParamBodyAngleZ', keyPulse * 4.5)
+        core.addParameterValueById('ParamAngleY', -s * bobAmp * BOB_HEAD_DEG)
+        core.addParameterValueById('ParamBodyAngleZ', s * bobAmp * BOB_BODY_DEG)
       } catch { /* ignore */ }
     }
 
@@ -653,8 +699,8 @@
       const pen = now < board.penUntil ? 1 : 0
       const ret = now < board.returnUntil ? 1 : 0
       const era = now < board.eraseUntil ? 1 : 0
-      const prs = now < board.pressUntil ? 1 : 0
-      const anyOn = pen | ret | era | prs
+      const prs = pressEnvelope(now)
+      const anyOn = pen | ret | era | (prs > 0.01 ? 1 : 0)
       // 全部熄灭后再补写一帧 0 收尾，之后就彻底不碰这四个参数了 ——
       // 它们同时也是用户能手动开关的表情，一直插手会跟热键打架。
       if (anyOn || boardDirty) {
@@ -1296,14 +1342,14 @@
       }
     })
 
-    /* 每一次按键的跟手节拍：累加一个脉冲（点头）+ 点亮板子上对应的图标 */
+    /* 每一次按键：抬一点「能量」（点头由 ticker 连续推），并点亮板子上的图标 */
     api.onKeyPulse((p) => {
       if (!p) return
       if (!pulseSeen) {
         pulseSeen = true
         api.log(`跟手脉冲已收到（gain=${p.gain}, key=${p.key || '未映射'}）`)
       }
-      keyPulse = Math.min(2, keyPulse + (p.gain || 1))
+      bobEnergy = Math.min(1, bobEnergy + BOB_ENERGY_PER_KEY)
       boardOnKey(p.key)
     })
 

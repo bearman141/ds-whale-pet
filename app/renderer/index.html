@@ -77,6 +77,56 @@
       </div>
     </div>
 
+    <!-- 其他设置（三级窗口：右键菜单 →「⚙️ 其他设置…」） -->
+    <div id="settings" class="card hidden">
+      <div class="p-head">
+        <span class="p-emoji">⚙️</span>
+        <div class="p-title">
+          <div class="c-title">其他设置</div>
+          <div class="p-sub">行为 · 声音 · 系统</div>
+        </div>
+        <button id="s-close" title="关闭面板">×</button>
+      </div>
+
+      <div class="s-body">
+        <div class="s-group">行为</div>
+        <label class="s-row"><span>总在最前</span><input type="checkbox" id="s-alwaysOnTop"></label>
+        <label class="s-row">
+          <span>按像素穿透<em>只在模型不透明的地方挡鼠标</em></span>
+          <input type="checkbox" id="s-clickThrough">
+        </label>
+        <label class="s-row">
+          <span>跟随我的键鼠<em>打字时点亮点菜板上的笔 / 回车 / 橡皮</em></span>
+          <input type="checkbox" id="s-inputReact">
+        </label>
+        <label class="s-row">
+          <span>全局热键<em>那张 46 条组合键的表</em></span>
+          <input type="checkbox" id="s-hotkeys">
+        </label>
+        <label class="s-row"><span>触发气泡<em>她说话时冒的小方框</em></span><input type="checkbox" id="s-bubble"></label>
+
+        <div class="s-group">声音</div>
+        <label class="s-row"><span>互动音效</span><input type="checkbox" id="s-sfx"></label>
+        <div class="s-row s-slider">
+          <span>音量</span>
+          <input type="range" id="s-volume" min="0" max="100" step="5">
+          <b id="s-volume-val">60</b>
+        </div>
+        <div class="c-row"><button id="s-sfx-test">▶ 试听</button></div>
+
+        <div class="s-group">系统</div>
+        <label class="s-row"><span>开机自动启动</span><input type="checkbox" id="s-autoLaunch"></label>
+        <div class="c-row">
+          <button id="s-reset-pos">🎯 回到右下角</button>
+          <button id="s-reset">↩️ 按键归位</button>
+        </div>
+        <div class="c-row">
+          <button id="s-readme">📖 按键表 / 说明</button>
+          <button id="s-open-dir">🗂️ 模型文件夹</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <noscript>需要启用 JavaScript</noscript>
@@ -86,5 +136,6 @@
   <script src="pet://local/vendor/pixi-live2d-display.cubism4.min.js"></script>
   <script src="pet://local/renderer/pet.js"></script>
   <script src="pet://local/renderer/chat.js"></script>
+  <script src="pet://local/renderer/settings.js"></script>
 </body>
 </html>

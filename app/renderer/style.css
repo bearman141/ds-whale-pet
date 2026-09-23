@@ -112,6 +112,97 @@ html, body {
 
 #panel { width: 296px; }
 #chat { width: 330px; }
+#settings { width: 302px; }
+
+/* ================= 其他设置（三级窗口） ================= */
+.s-body { margin-top: 9px; display: flex; flex-direction: column; }
+
+.s-group {
+  margin: 9px 0 2px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #8ba3b3;
+  letter-spacing: 0.6px;
+}
+.s-group:first-child { margin-top: 0; }
+
+.s-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  cursor: pointer;
+}
+.s-row > span { flex: 1; min-width: 0; font-size: 12px; color: #22374d; }
+.s-row em {
+  display: block;
+  font-style: normal;
+  font-size: 10.5px;
+  color: #93a7b5;
+  line-height: 1.35;
+}
+
+/* 开关：用 appearance:none 自己画，免得各系统原生复选框长得不一样 */
+.s-row input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  position: relative;
+  width: 34px;
+  height: 19px;
+  margin: 0;
+  border-radius: 10px;
+  background: #c9d8e2;
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+.s-row input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(10, 40, 70, 0.3);
+  transition: transform 0.18s ease;
+}
+.s-row input[type="checkbox"]:checked { background: #4aa8dd; }
+.s-row input[type="checkbox"]:checked::after { transform: translateX(15px); }
+
+.s-slider { cursor: default; gap: 6px; }
+.s-slider input[type="range"] {
+  flex: none;
+  width: 116px;
+  height: 4px;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 2px;
+  background: rgba(120, 190, 235, 0.45);
+  outline: none;
+  cursor: pointer;
+}
+.s-slider input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #4aa8dd;
+  box-shadow: 0 1px 3px rgba(10, 40, 70, 0.35);
+  cursor: pointer;
+}
+.s-slider b {
+  flex: none;
+  width: 24px;
+  text-align: right;
+  font-size: 11px;
+  font-weight: 600;
+  color: #55707f;
+}
+
+#settings .c-row { margin-top: 6px; }
 
 /* ================= 通用头部 ================= */
 .p-head { display: flex; align-items: center; gap: 8px; }
@@ -119,7 +210,7 @@ html, body {
 .p-title { flex: 1; min-width: 0; }
 .p-sub { font-size: 11px; color: #7d8f9e; }
 
-#c-close {
+#c-close, #s-close {
   border: none;
   background: transparent;
   color: #9fb3c2;
@@ -128,7 +219,7 @@ html, body {
   cursor: pointer;
   padding: 0 2px;
 }
-#c-close:hover { color: #e2607f; }
+#c-close:hover, #s-close:hover { color: #e2607f; }
 
 /* ================= 聊天面板 ================= */
 .c-title { font-size: 14px; font-weight: 700; color: #17405f; }

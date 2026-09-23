@@ -2,6 +2,9 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('petAPI', {
+  /** 渲染层用它决定要不要打调试日志（preload 能读到 process.env） */
+  inputDebug: !!process.env.DSHPET_INPUTDEBUG,
+
   init: () => ipcRenderer.invoke('pet:init'),
 
   /** 指针是否落在模型不透明像素上 */
@@ -47,6 +50,13 @@ contextBridge.exposeInMainWorld('petAPI', {
   onBubbleSetting: (fn) => ipcRenderer.on('pet:bubbleSetting', (_e, on) => fn(on)),
   onSfxSetting: (fn) => ipcRenderer.on('pet:sfxSetting', (_e, s) => fn(s)),
   onSfxTest: (fn) => ipcRenderer.on('pet:sfx-test', () => fn()),
+
+  /* ---- 其他设置（三级窗口） ---- */
+  onSettingsPanel: (fn) => ipcRenderer.on('pet:settings-panel', (_e, p) => fn(p)),
+  onSettingsChanged: (fn) => ipcRenderer.on('pet:settings-changed', (_e, s) => fn(s)),
+  settingsGet: () => ipcRenderer.invoke('pet:settings-get'),
+  settingsSet: (key, value) => ipcRenderer.send('pet:settings-set', { key, value }),
+  settingsDo: (what) => ipcRenderer.send('pet:settings-do', { what }),
 
   /* ---- 调试抓图 ---- */
   onShot: (fn) => ipcRenderer.on('pet:shot', (_e, spec) => fn(spec)),
