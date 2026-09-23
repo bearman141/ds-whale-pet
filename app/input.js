@@ -27,7 +27,7 @@ const DOZE_IDLE_MS = 150000     // 2.5 分钟没动静 → 犯困
 const MIN_DWELL_MS = 1200       // 反应最小驻留时间（防阈值抖动导致表情闪烁）
 
 /* 打字速度档位（键/秒） */
-const RATE_EXCITED = 5.0
+const RATE_EXCITED = 4.0        // 调到 4.0：5.0 对普通人偏难触发，反馈太少见
 const RATE_TYPING = 0.8
 
 /* ================================================================== *
@@ -84,7 +84,7 @@ const REACTIONS = [
     pulse: 1.0,
   },
   {
-    id: 'clicky', priority: 50, emoji: '👆', name: '被戳了', sfx: null,
+    id: 'clicky', priority: 50, emoji: '👆', name: '被戳了', sfx: 'squeak',
     when: (s) => s.clicksRecent >= 3,
     reason: '你连着点鼠标',
     expressions: ['调皮'],

@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('petAPI', {
   onReact: (fn) => ipcRenderer.on('pet:react', (_e, r) => fn(r)),
   /** 每一次按键的跟手节拍 */
   onKeyPulse: (fn) => ipcRenderer.on('pet:keypulse', (_e, p) => fn(p)),
+  /** 每一次鼠标按下（全局，不只是点在模型上） */
+  onClickPulse: (fn) => ipcRenderer.on('pet:clickpulse', (_e, p) => fn(p)),
   onEvents: (fn) => ipcRenderer.on('pet:events', (_e, ev) => fn(ev)),
 
   /* ---- 聊天 ---- */

@@ -262,10 +262,48 @@ function wake () {
   return finish(o)
 }
 
+/**
+ * 按键：一下很轻的「哒 / 啾」
+ *
+ * 这是整套「输入联动」里最关键的一个音 —— BongoCat 那种感觉基本靠它：
+ * 表情可以一直不变，但**每敲一下都必须有回应**，否则用户会认为桌宠根本没反应。
+ * 所以它必须极短、偏闷、音量小，连打几百下也不烦人。
+ *
+ * 变调不在这里做 —— 播放时用 playbackRate 随机 ±10%，
+ * 一个文件就能听起来不像复读机。
+ */
+function key (pitch = 1) {
+  const dur = 0.075
+  const o = buf(dur)
+  // 主音：短促下扫，像指尖弹了一下橡皮
+  add(o, tone({
+    dur,
+    freqFn: (p) => lerp(1350, 620, Math.pow(p, 0.42)) * pitch,
+    wave: 'tri',
+    decay: 6.5,
+    attack: 0.0015,
+    gain: 0.8,
+  }))
+  // 一点高频，让它有「触点」的清脆感
+  add(o, tone({
+    dur: 0.035,
+    f0: 2800 * pitch,
+    f1: 1500 * pitch,
+    wave: 'sin',
+    decay: 10,
+    attack: 0.001,
+    gain: 0.16,
+  }))
+  // 起手气声：橡胶摩擦的那一下
+  add(o, noise({ dur: 0.01, decay: 20, hp: 2600, gain: 0.1 }))
+  return finish(o, 0.62, 4)
+}
+
 /* ================================================================== *
  * 输出
  * ================================================================== */
 const SOUNDS = {
+  key,             // 敲键盘 / 点鼠标（每一下）
   squeak,          // 摸摸头 / 点她
   happy,           // 喂食
   nom,             // 咀嚼
@@ -280,15 +318,26 @@ const SOUNDS = {
 
 function main () {
   fs.mkdirSync(OUT_DIR, { recursive: true })
+
+  // 可以只生成指定的几个：node tools/make-sfx.js key
+  // （加新音效时只想补一个文件，不想把 10 个 wav 全倒进 sfx/ 的话很有用）
+  const only = process.argv.slice(2).filter((a) => !a.startsWith('-'))
+  const unknown = only.filter((n) => !SOUNDS[n])
+  if (unknown.length) {
+    console.error(`未知音效：${unknown.join(', ')}\n可用：${Object.keys(SOUNDS).join(', ')}`)
+    process.exit(1)
+  }
+  const names = only.length ? only : Object.keys(SOUNDS)
+
   let total = 0
-  for (const [name, fn] of Object.entries(SOUNDS)) {
-    const wav = toWav(fn())
+  for (const name of names) {
+    const wav = toWav(SOUNDS[name]())
     const file = path.join(OUT_DIR, name + '.wav')
     fs.writeFileSync(file, wav)
     total += wav.length
     console.log(`  ${name.padEnd(9)} ${(wav.length / 1024).toFixed(1).padStart(6)} KB   ${(wav.length - 44) / 2 / SR}s`)
   }
-  console.log(`\n共 ${Object.keys(SOUNDS).length} 个音效，合计 ${(total / 1024).toFixed(0)} KB → ${OUT_DIR}`)
+  console.log(`\n共 ${names.length} 个音效，合计 ${(total / 1024).toFixed(0)} KB → ${OUT_DIR}`)
 }
 
 module.exports = { main, SOUNDS }

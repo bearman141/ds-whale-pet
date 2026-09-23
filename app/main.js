@@ -466,18 +466,34 @@ function startUiohook () {
 
   /* ---- 输入联动：喂给追踪器 ---- */
   // 注意这两件事是解耦的：热键关了，输入联动照样要工作（反过来也是）。
+  //
+  // rawLog 是排障用的：DSHPET_INPUTDEBUG=1 时把每个原始事件和追踪器状态写进日志。
+  // 「桌宠没反应」几乎总是「钩子根本没收到事件」，而不是规则判断错了 ——
+  // 出问题时必须能一眼分清这两者，不然就只能瞎猜。
+  const rawLog = !!process.env.DSHPET_INPUTDEBUG
+  const rawCount = { key: 0, click: 0, wheel: 0, move: 0 }
+
   uIOhook.on('keydown', () => {
     const now = Date.now()
+    if (rawLog) { rawCount.key++; log(`[raw] keydown #${rawCount.key}`) }
     if (input) { input.key(now); sendKeyPulse(now) }
   })
-  uIOhook.on('mousedown', () => { if (input) input.click(Date.now()) })
-  uIOhook.on('wheel', () => { if (input) input.wheel(Date.now()) })
+  uIOhook.on('mousedown', () => {
+    if (rawLog) { rawCount.click++; log(`[raw] mousedown #${rawCount.click}`) }
+    if (input) input.click(Date.now())
+    sendClickPulse()
+  })
+  uIOhook.on('wheel', () => {
+    if (rawLog) { rawCount.wheel++; log(`[raw] wheel #${rawCount.wheel}`) }
+    if (input) input.wheel(Date.now())
+  })
   // mousemove 的频率可以到 1000Hz，不能每个都喂 —— 250ms 采一次足够判断「人还在不在」
   let lastMoveSeen = 0
   uIOhook.on('mousemove', () => {
     const now = Date.now()
     if (!input || now - lastMoveSeen < 250) return
     lastMoveSeen = now
+    if (rawLog) { rawCount.move++; log(`[raw] mousemove #${rawCount.move}`) }
     input.move(now)
   })
 
@@ -601,6 +617,7 @@ function fireAction (action) {
  * ================================================================== */
 let input = null
 let inputTimer = null
+let inputDebugTimer = null
 let lastPulseSent = 0
 let lastBubbleAt = 0
 
@@ -654,6 +671,43 @@ function startInputLoop () {
   clearInterval(inputTimer)
   inputTimer = setInterval(inputTick, INPUT_TICK_MS)
   log(`输入联动已启动（每 ${INPUT_TICK_MS} ms 评估一次）`)
+
+  // 排障心跳：DSHPET_INPUTDEBUG=1 时每 5 秒把追踪器看到的东西写出来。
+  // 「钩子收不到」和「规则判错了」在日志里长得完全不一样，这一行就能分开。
+  if (process.env.DSHPET_INPUTDEBUG) {
+    clearInterval(inputDebugTimer)
+    inputDebugTimer = setInterval(() => {
+      if (!input) return
+      const s = input.snapshot()
+      log(`[raw] 追踪器 键/秒=${s.keysPerSec} 点击=${s.clicksRecent} 滚轮=${s.wheelRecent} ` +
+        `空闲=${s.idleSeconds}s 反应=${input.reaction.id}`)
+    }, 5000)
+  }
+}
+
+/**
+ * 演示模式（DSHPET_DEMO=1）：每 4 秒轮播一个反应，不依赖任何真实输入。
+ *
+ * 存在的意义有两个：
+ *  - 验证「反应 → 表情层 + 台词 + 音效」这条链路本身是通的。
+ *    桌宠不吭声时，必须先分清是「钩子没收到输入」还是「渲染层没表现」，
+ *    否则只能瞎猜。
+ *  - 给你看一眼到底设计了哪些反应、分别长什么样。
+ */
+function startDemoLoop () {
+  const { REACTIONS } = require('./input')
+  let i = 0
+  log(`演示模式已开启：${REACTIONS.length} 个反应，每 4 秒轮播一个`)
+  setInterval(() => {
+    const rule = REACTIONS[i % REACTIONS.length]
+    i++
+    const bubble = rule.bubbles && rule.bubbles.length
+      ? rule.bubbles[Math.floor(Math.random() * rule.bubbles.length)]
+      : null
+    log(`演示 -> ${rule.emoji} ${rule.name}｜表情 [${rule.expressions.join(',') || '无'}]` +
+      `｜音效 ${rule.sfx || '无'}｜台词 ${bubble || '无'}`)
+    sendReact(reactPayload(rule, { bubble, sfx: rule.sfx, stats: input ? input.snapshot() : null }))
+  }, 4000)
 }
 
 /** 每次按键的跟手节拍：渲染层会把它衰减成一下轻微的点头 */
@@ -663,6 +717,18 @@ function sendKeyPulse (now) {
   if (now - lastPulseSent < PULSE_MIN_GAP_MS) return
   lastPulseSent = now
   win.webContents.send('pet:keypulse', { gain: input.pulseGain() })
+}
+
+/**
+ * 每次鼠标按下的轻响
+ *
+ * 和按键共用同一个「哒」：点桌面、点按钮、点她，都该有回应。
+ * 渲染层自己会按 settings.sfx 决定放不放，这里只管转发。
+ */
+function sendClickPulse () {
+  if (!settings.inputReact) return
+  if (!win || win.isDestroyed()) return
+  win.webContents.send('pet:clickpulse', {})
 }
 
 /** 把表现指令转给渲染进程（原来这个函数还兼着写养成日志，现在只做转发） */
@@ -1302,6 +1368,7 @@ if (!app.requestSingleInstanceLock()) {
     startHotkeys()
     startCursorPoll()
     startAlwaysOnTopWatch()
+    if (process.env.DSHPET_DEMO) startDemoLoop()
 
     screen.on('display-metrics-changed', () => {
       if (!win || win.isDestroyed()) return

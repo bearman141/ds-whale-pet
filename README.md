@@ -36,22 +36,31 @@
 | 80 | 😪 犯困 | 安静超过 **2.5 分钟**，或深夜 + 安静 30 秒 | 晕晕 |
 | 75 | ❗ 你回来啦 | 离开 90 秒以上后重新动键鼠 | 感叹号 |
 | 70 | 🤩 被你带嗨了 | 打字速度 **≥ 5 键/秒** | 星星眼 |
-| 60 | ⌨️ 在陪你打字 | 打字速度 **≥ 0.8 键/秒** | —（只点头，不换表情） |
+| 60 | ⌨️ 在陪你打字 | 打字速度 **≥ 0.8 键/秒** | —（只点头 + 每键一声「哒」） |
 | 50 | 👆 被戳了 | 2.5 秒内点击 **≥ 3 次** | 调皮 |
 | 45 | 🌀 跟着滚 | 刚滚过滚轮 | 问号 |
 | 0 | 🐋 陪着你 | 兜底 | — |
 
 ### 2.1 「跟手」才是重点
 
-每敲一下键盘，她都会**轻轻点一下头**（用 `ParamAngleY` + `ParamBodyAngleZ` 叠一个
-指数衰减的脉冲，时间常数 120ms）。这一条不换表情、不冒台词，就是纯粹的跟手反馈 ——
-也是整套东西里最像 BongoCat 的部分。
+**每敲一下键盘，她都会同时做两件事**：
+
+1. **一声很轻的「哒」**（`key` 音效，见第五节）
+2. **轻轻点一下头** —— 用 `ParamAngleY` + `ParamBodyAngleZ` 叠一个指数衰减的脉冲，
+   时间常数 120ms，连打时叠加，上限约 12°
+
+这两条都**不换表情、不冒台词**，是纯粹的跟手反馈，也是整套东西里最像 BongoCat 的部分。
+
+> 这里踩过最大的一个坑：最初只有点头、**没有声音**，而且点头幅度只有 2.4°/1.5°。
+> 结果是「一切都按设计工作，但用户完全看不出它在工作」—— 反馈必须做到**一眼可见、
+> 一耳可闻**，克制不等于没反应。点头幅度前后调了两轮（2.4/1.5 → 5.0/3.0 → 5.5/4.5）。
 
 打字的时候她的**视线还会往下偏一点**，像是也在看你的键盘。
 
-### 2.2 刻意克制
+### 2.2 克制的是「表情和台词」，不是「反馈」
 
-- 「在陪你打字」**不换表情、不说台词**，只有点头 —— 你写代码时她不会一直跳。
+- 「在陪你打字」**不换表情、不说台词** —— 你写代码时她不会一直跳；
+  但她会**一直点头 + 一直有「哒」声**，你能确定她还活着。
 - 台词每次之间至少隔 **4 秒**，状态来回抖也不会刷屏。
 - 反应切换有**迟滞**：升级（比如从发呆变成被你带嗨）立刻生效，
   降级要等满 1.2 秒 —— 否则计数卡在阈值上时表情会疯狂闪烁（实测踩过，见第八节）。
@@ -182,19 +191,29 @@ DeepSeek / OpenAI / Moonshot / 智谱 / Ollama / LM Studio / one-api 都能用�
 
 ## 五、互动音效
 
-每类反应都配了音效，基调是「捏橡皮小黄鸭」。
+基调是「捏橡皮小黄鸭」。**关键在于每按一下键、每点一下鼠标都有一声「哒」** ——
+这一条是整套输入联动里最容易漏掉、也最影响体感的：
 
-| 音效 | 触发 | Mixkit 素材 |
+> 最初的设计是「打字时保持安静，只给一个很轻的点头」，结果所有人都以为桌宠坏了。
+> 表情可以一直不变，但**每一下输入都必须有回应**，这正是 BongoCat 的做法。
+
+| 音效 | 触发 | 素材 |
 | --- | --- | --- |
-| 🦆 squeak | 摸摸头 / 点她 | **Rubber duck squeak** |
-| 😴 sleepy | 犯困 | Cartoon vocal yawn |
-| ⏰ wake | 你离开又回来 | Cartoon toy whistle |
-| 😊 happy | 被你带嗨 | Funny Giggling |
-| 😋 nom / 🎾 boing / 🛁 splash | 旧互动保留 | Chewing / Boing hit / Water splash |
-| ✨ sparkle / 🎉 levelup | 旧互动保留 | Magic wand sparkle / Achievement bell |
-| 🚫 no | 操作被拒 | Cartoon failure piano |
+| ⌨️ key | **每敲一下键 / 点一下鼠标** | 本仓库合成（`tools/make-sfx.js key`） |
+| 🦆 squeak | 摸摸头 / 点她 | Mixkit **Rubber duck squeak** |
+| 😴 sleepy | 犯困 | Mixkit Cartoon vocal yawn |
+| ⏰ wake | 你离开又回来 | Mixkit Cartoon toy whistle |
+| 😊 happy | 被你带嗨 | Mixkit Funny Giggling |
+| 😋 nom / 🎾 boing / 🛁 splash | 旧互动保留 | Mixkit Chewing / Boing hit / Water splash |
+| ✨ sparkle / 🎉 levelup | 旧互动保留 | Mixkit Magic wand sparkle / Achievement bell |
+| 🚫 no | 操作被拒 | Mixkit Cartoon failure piano |
 
-素材来自 [Mixkit](https://mixkit.co/free-sound-effects/)（[Mixkit Free License](https://mixkit.co/license/#sfxFree)），
+`key` 是唯一一个**程序合成**的音效（75ms、1.6 KB），不引外部素材：
+它响得太频繁，必须极短、偏闷、音量小，连打几百下也不能烦。
+播放时每次随机 ±10% 变调（`playbackRate`），一个文件听起来才不像复读机；
+另有三条保护：最小间隔 32ms、音量压到 0.42、点在她身上时不叠（那一下已经响过 squeak）。
+
+Mixkit 那 10 个素材来自 [Mixkit](https://mixkit.co/free-sound-effects/)（[Mixkit Free License](https://mixkit.co/license/#sfxFree)），
 `tools/fetch-sfx.ps1` 可复现地重新下载并处理（去头静音 → 裁剪 → 压缩器 →
 `loudnorm` → 尾淡出 → 单声道 22.05kHz/96kbps mp3），10 个共 **147 KB**。
 
@@ -203,6 +222,32 @@ DeepSeek / OpenAI / Moonshot / 智谱 / Ollama / LM Studio / one-api 都能用�
 对这么短的音频又不准，于是加了第二遍实测修正，最终 8 个精确落在 −20.5 dB。
 
 开关和音量在菜单里：「🔊 互动音效」+「🔉 音效音量」（小/中/大，带试听）。
+
+### 两个排障开关
+
+桌宠「不吭声」时，最要紧的是先分清**钩子没收到输入**还是**收到了但没表现**，
+否则只能瞎猜。两个环境变量把这两半分开：
+
+```powershell
+# 每 5 秒打印追踪器看到的东西 + 每个原始事件
+$env:DSHPET_INPUTDEBUG = "1"; npm start
+
+# 每 4 秒轮播一个反应，完全不依赖真实输入
+$env:DSHPET_DEMO = "1"; npm start
+```
+
+`DSHPET_DEMO=1` 会把 8 个反应依次演一遍，日志里同时给出
+`演示 -> 💤 睡着了｜表情 [闭眼口水]｜音效 无｜台词 Zzz……`，
+一眼就能看出哪些反应本来就「不换表情、不出声」（比如 `⌨️ 在陪你打字`）。
+
+而 `DSHPET_INPUTDEBUG=1` 的心跳长这样：
+
+```
+[raw] 追踪器 键/秒=0 点击=0 滚轮=0 空闲=25s 反应=idle
+```
+
+`空闲` 一直在涨、`键/秒` 一直是 0 → 钩子根本没收到事件（安全软件拦截 / 权限问题）；
+数字在动但反应不对 → 问题在规则或渲染层。
 
 ---
 
@@ -223,11 +268,11 @@ deskpet/
 │  │  ├─ pet.js         Live2D 渲染 / 分层表情栈 / 视线跟随 / 跟手脉冲 / 像素命中
 │  │  └─ chat.js        聊天面板
 │  ├─ vendor/           live2dcubismcore + pixi + pixi-live2d-display
-│  ├─ sfx/              10 个互动音效（mp3，共 147 KB）
+│  ├─ sfx/              11 个互动音效（mp3，共 149 KB）
 │  ├─ model/            模型资源（moc3 / 贴图 / 物理 / 44 表情 / 8 动作）
 │  ├─ tools/
 │  │  ├─ make-model3.js   生成 model3.json + 修正动作 Loop 标记
-│  │  ├─ make-sfx.js      程序合成音效（备选方案，输出 wav）
+│  │  ├─ make-sfx.js      程序合成音效（可只生成指定几个：`make-sfx.js key`）
 │  │  ├─ test-input.js    输入联动测试（48 条断言）
 │  │  └─ test-chat.js     聊天模块测试（83 条断言，含 SSE 流式解析）
 │  └─ assets/icon.png

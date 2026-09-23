@@ -30,7 +30,7 @@
   const EXPR_FADE = 0.16           // 秒
   const CLICK_MOVE_TOLERANCE = 5   // px，超过算拖动
   const ALPHA_HIT_THRESHOLD = 12
-  const KEYPULSE_TAU = 0.12        // 跟手脉冲的衰减时间常数（秒）
+  const KEYPULSE_TAU = 0.15        // 跟手脉冲的衰减时间常数（秒）
 
   /* ============================================================ *
    * 状态
@@ -98,7 +98,6 @@
   let lastFrame = performance.now()
   let currentReact = null
   let keyPulse = 0          // 每次按键叠加的跟手脉冲，会自然衰减
-  let pulseGain = 1
   let pulseSeen = false
 
   const pixel = new Uint8Array(4)
@@ -592,14 +591,18 @@
       }
     }
 
-    // 跟手节拍：你每敲一下键，她轻轻点一下头。
-    // 这是这套「输入联动」里最像 BongoCat 的部分 —— 用 addParameterValueById
+    // 跟手节拍：你每敲一下键，她点一下头。
+    // 这是整套「输入联动」里最像 BongoCat 的部分 —— 用 addParameterValueById
     // 是「叠加」语义，不会覆盖视线跟随和物理算出来的值。
     // 必须放在下面那个 early return 之前，否则没表情时就不抖了。
+    //
+    // 幅度调过两轮：2.4°/1.5° → 5.0°/3.0° → 现在 5.5°/4.5°。
+    // 前两轮用户都反馈「根本看不出来」，所以别怕做重：连打时上限 2.6 × 4.5° ≈ 12°，
+    // 一眼就能看见她在跟着你的手速点头，单次轻敲也还有约 4°。
     if (keyPulse > 0.002) {
       try {
-        core.addParameterValueById('ParamAngleY', -keyPulse * 2.4)
-        core.addParameterValueById('ParamBodyAngleZ', keyPulse * 1.5)
+        core.addParameterValueById('ParamAngleY', -keyPulse * 5.5)
+        core.addParameterValueById('ParamBodyAngleZ', keyPulse * 4.5)
       } catch { /* ignore */ }
     }
 
@@ -903,7 +906,6 @@
   function applyReact (r) {
     if (!r) return
     currentReact = r
-    pulseGain = typeof r.pulseGain === 'number' ? r.pulseGain : 1
     syncReactLayer(r.expressions)
   }
 
@@ -934,7 +936,7 @@
    * 用 <audio> + cloneNode 是为了让同一个音效可以重叠播放（连点的时候）。
    * 自动播放限制由主进程的 autoplay-policy 开关解除。
    * ============================================================ */
-  const SFX_NAMES = ['squeak', 'happy', 'nom', 'boing', 'splash', 'sparkle', 'levelup', 'sleepy', 'no', 'wake']
+  const SFX_NAMES = ['key', 'squeak', 'happy', 'nom', 'boing', 'splash', 'sparkle', 'levelup', 'sleepy', 'no', 'wake']
   const sfxPool = new Map()
   let sfxVerified = false
 
@@ -953,7 +955,7 @@
     api.log(`音效已装载 ${SFX_NAMES.length} 个`)
   }
 
-  function playSfx (name, gain = 1, force = false) {
+  function playSfx (name, gain = 1, force = false, rate = 1) {
     if ((!settings.sfx && !force) || !name) return
     const base = sfxPool.get(name)
     if (!base) { api.log('未知音效: ' + name); return }
@@ -961,6 +963,7 @@
       const a = base.cloneNode()
       const vol = settings.sfxVolume == null ? 0.6 : settings.sfxVolume
       a.volume = Math.max(0, Math.min(1, vol * gain))
+      if (rate !== 1) a.playbackRate = rate
       const p = a.play()
       if (p && p.then) {
         p.then(() => {
@@ -971,6 +974,27 @@
     } catch (e) {
       api.log('音效异常: ' + e.message)
     }
+  }
+
+  /* ---------------------------------------------------------------- *
+   * 每键的「哒」声
+   *
+   * 这是整套输入联动里最要紧的一环。表情可以一直不变，但**每敲一下都得有回应**，
+   * 否则用户会觉得桌宠根本没在工作 —— 这正是最初「反应在哪？声音也没了」的原因。
+   *
+   * 三个细节：
+   *  - 最小间隔 32ms：连打时不会叠成一团噪音，也不会漏掉明显的手速
+   *  - 每次随机 ±10% 变调：一个文件听起来才不像复读机
+   *  - 音量压到 0.42：它是背景里的「哒」，不能盖过状态切换时的音效
+   * ---------------------------------------------------------------- */
+  const KEY_SFX_MIN_GAP = 32
+  let lastKeySfxAt = 0
+
+  function playKeyTick () {
+    const now = performance.now()
+    if (now - lastKeySfxAt < KEY_SFX_MIN_GAP) return
+    lastKeySfxAt = now
+    playSfx('key', 0.42, false, 0.9 + Math.random() * 0.22)
   }
 
   /* ============================================================ *
@@ -1050,9 +1074,23 @@
     return !!(t && t.closest && t.closest('#panels'))
   }
 
-  /** 单击 = 摸摸头，交给养成引擎结算（心情/好感/经验 + 反应） */
+  /**
+   * 单击 = 摸摸头。
+   *
+   * 养成系统砍掉之后就没有主进程结算了，所以这里直接给本地反应。
+   * （之前这里还在调 api.gameAction，那个 IPC 已经删了 —— 点她等于直接抛异常，
+   *   表现就是「点什么都没反应」，这个 bug 是用户报出来的。）
+   */
+  const PET_LINES = ['呼噜呼噜～', '嗯……舒服', '嘿嘿', '再摸摸嘛', '（蹭了蹭你的手）']
+
+  // 点在她身上时已经有一声 squeak 了，别再叠一声「哒」
+  let lastPetClickAt = 0
+
   function reactToClick () {
-    api.gameAction('pet')
+    lastPetClickAt = performance.now()
+    addExpression('脸红', 'event', 2000)
+    playSfx('squeak', 0.9)
+    if (Math.random() < 0.45) showBubble(PET_LINES[Math.floor(Math.random() * PET_LINES.length)])
   }
 
   /* ============================================================ *
@@ -1104,19 +1142,34 @@
       }
     })
 
-    /* 输入联动：当前反应 → 反应层表情 */
+    /* 输入联动：当前反应 → 反应层表情 + 台词 + 音效 */
     api.onReact((r) => {
       if (!r) return
       currentReact = r
-      pulseGain = typeof r.pulseGain === 'number' ? r.pulseGain : 1
       syncReactLayer(r.expressions)
+      // 这两行原来漏了 —— 载荷里明明带着 bubble / sfx，渲染层却没接，
+      // 结果犯困、你回来啦、被带嗨这几个音效和台词全都不出声。
+      if (r.bubble) showBubble(r.bubble, 3000)
+      if (r.sfx) playSfx(r.sfx)
+      if (r.bubble || r.sfx) {
+        api.log(`反应表现 -> ${r.sfx ? '音效 ' + r.sfx : ''}${r.sfx && r.bubble ? ' + ' : ''}` +
+          `${r.bubble ? '台词「' + r.bubble + '」' : ''}`)
+      }
     })
 
-    /* 每一次按键的跟手节拍：累加一个脉冲，渲染时衰减成一下轻微点头 */
+    /* 每一次按键的跟手节拍：一声「哒」+ 累加一个脉冲，渲染时衰减成一下点头 */
     api.onKeyPulse((p) => {
       if (!p) return
       if (!pulseSeen) { pulseSeen = true; api.log(`跟手脉冲已收到（gain=${p.gain}）`) }
-      keyPulse = Math.min(3, keyPulse + (p.gain || 1))
+      keyPulse = Math.min(2.6, keyPulse + (p.gain || 1))
+      playKeyTick()
+    })
+
+    /* 鼠标点一下也算一次「哒」—— 点桌面、点按钮都该有回应。
+       点在她自己身上的那一下除外：那种情况上面已经响过 squeak 了。 */
+    api.onClickPulse(() => {
+      if (performance.now() - lastPetClickAt < 400) return
+      playKeyTick()
     })
 
     api.onSize((h) => {
