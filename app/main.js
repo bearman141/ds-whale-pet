@@ -228,7 +228,7 @@ function createWindow () {
   win.once('ready-to-show', () => {
     win.showInactive()
     // 显示之后再设一次：只在构造/显示前调用有时不生效
-    win.setAlwaysOnTop(settings.alwaysOnTop, 'floating')
+    applyAlwaysOnTop('show')
     log('窗口已显示', wa)
     setTimeout(() => {
       if (!win || win.isDestroyed()) return
@@ -300,6 +300,53 @@ function startCursorPoll () {
     } catch { /* ignore */ }
   }, 50)
   log('光标轮询已启动（50ms）')
+}
+
+/* ------------------------------------------------------------------ *
+ * 「总在最前」自愈
+ *
+ * 实测这个状态会漂：同一个版本，12:39 起来是 true，14:43 起来变成 false。
+ * 一漂她就被别的窗口盖住 —— 用户看到的现象就是「桌宠打不开了」，
+ * 其实进程还活着、日志还在跑。
+ *
+ * 所以每 3 秒确认一次，掉了就补回来，并把漂掉这件事写进日志方便追。
+ * ------------------------------------------------------------------ */
+let topWatch = null
+
+function applyAlwaysOnTop (why) {
+  if (!win || win.isDestroyed()) return
+  const want = !!settings.alwaysOnTop
+
+  // 千万别调 win.moveTop() 来「顺便提到最前」—— 它内部是
+  // SetWindowPos(HWND_TOP)，而 HWND_TOP 会**清掉 WS_EX_TOPMOST**：
+  // setAlwaysOnTop(true) 刚设好就被自己撤销了。
+  // （这个坑真实踩过：日志里每 3 秒「重新置顶」一次、每次都「未生效」。）
+  const attempts = want
+    ? [
+        ['screen-saver', () => win.setAlwaysOnTop(true, 'screen-saver')],
+        ['default', () => win.setAlwaysOnTop(true)],
+      ]
+    : [['off', () => win.setAlwaysOnTop(false)]]
+
+  for (const [label, fn] of attempts) {
+    try { fn() } catch (e) { log(`置顶尝试「${label}」抛错: ${e.message}`); continue }
+    if (win.isAlwaysOnTop() === want) {
+      if (label !== attempts[0][0]) log(`置顶改用「${label}」才生效`)
+      return
+    }
+  }
+  log(`总在最前未生效（期望 ${want}）@${why}`)
+}
+
+function startAlwaysOnTopWatch () {
+  if (topWatch) return
+  topWatch = setInterval(() => {
+    if (!win || win.isDestroyed()) return
+    if (!settings.alwaysOnTop) return
+    if (win.isAlwaysOnTop()) return
+    log('检测到「总在最前」掉了，重新置顶')
+    applyAlwaysOnTop('watch')
+  }, 3000)
 }
 
 function setInteractive (on) {
@@ -952,7 +999,7 @@ function applySetting (key, value) {
       win?.webContents.send('pet:size', SIZE_PRESETS[value])
       break
     case 'alwaysOnTop':
-      win?.setAlwaysOnTop(!!value, 'floating')
+      applyAlwaysOnTop('menu')
       break
     case 'clickThrough':
       hardResetInteraction()
@@ -1229,8 +1276,13 @@ function setupIpc () {
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
+  // 第二次双击启动器时：新进程会立刻退出（单实例锁），所以必须由这里
+  // 把已有窗口重新推到前面 —— 否则用户看到的现象就是「双击了但没反应」。
   app.on('second-instance', () => {
-    win?.showInactive()
+    log('检测到第二次启动：把已有窗口重新推到前面')
+    if (!win || win.isDestroyed()) return
+    win.showInactive()
+    applyAlwaysOnTop('second-instance')
   })
 
   app.whenReady().then(() => {
@@ -1266,6 +1318,7 @@ if (!app.requestSingleInstanceLock()) {
     startHotkeys()
     startGameLoop()
     startCursorPoll()
+    startAlwaysOnTopWatch()
 
     screen.on('display-metrics-changed', () => {
       if (!win || win.isDestroyed()) return
