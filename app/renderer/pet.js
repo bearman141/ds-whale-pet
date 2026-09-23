@@ -98,6 +98,39 @@
   let lastFrame = performance.now()
   let currentReact = null
   let keyPulse = 0          // 每次按键叠加的跟手脉冲，会自然衰减
+  const debugParams = new Map()   // 仅调试用：抓图脚本临时压住的参数
+
+  /* ---------------------------------------------------------------- *
+   * 点菜板上的图标（打字时亮）
+   *
+   * 模型自带一块「点菜板」放在她身前，板子上画了三个图标：↩ / ✏ / 🧽，
+   * 平时都是**黑色**的。模型给了三个参数把它们**变蓝**：
+   *   bi      画笔   —— 打字时亮，同时她右手会真的举起笔
+   *   chehui  撤回   —— 也就是板子上那个 ↩（回车符号）
+   *   pi      橡皮
+   *   pointZ  手按下 —— 每敲一下手往下按一下（跟手）
+   *
+   * 所以「打字的时候亮、平时暗、按回车亮」不用画任何新图形，
+   * 直接切这几个参数就有 —— 而且笔一握、手一按，她看起来是真的在跟着你写。
+   * ---------------------------------------------------------------- */
+  const BOARD_PEN_HOLD_MS = 1200   // 停手之后笔还亮多久
+  const BOARD_FLASH_MS = 700       // 回车 / 橡皮亮多久
+  const BOARD_PRESS_MS = 180       // 跟手的「手按下」
+  const board = { penUntil: 0, returnUntil: 0, eraseUntil: 0, pressUntil: 0 }
+  let boardDirty = false
+  let boardLogTag = ''
+
+  function boardOnKey (key) {
+    const now = performance.now()
+    if (key === 'Enter' || key === 'NumEnter') {
+      board.returnUntil = now + BOARD_FLASH_MS
+    } else if (key === 'Backspace' || key === 'Del') {
+      board.eraseUntil = now + BOARD_FLASH_MS
+    } else {
+      board.penUntil = now + BOARD_PEN_HOLD_MS
+    }
+    board.pressUntil = now + BOARD_PRESS_MS
+  }
   let pulseSeen = false
 
   const pixel = new Uint8Array(4)
@@ -606,6 +639,41 @@
       } catch { /* ignore */ }
     }
 
+    // 调试抓图用：脚本指定的参数放最后，盖过上面所有层。
+    // 只在 DSHPET_SHOT 探测时非空，正常运行时这个 Map 是空的。
+    if (debugParams.size) {
+      for (const [id, v] of debugParams) {
+        try { core.setParameterValueById(id, v) } catch { /* ignore */ }
+      }
+    }
+
+    // 点菜板上的三个图标 + 手按下（见上面 boardOnKey 的说明）
+    {
+      const now = performance.now()
+      const pen = now < board.penUntil ? 1 : 0
+      const ret = now < board.returnUntil ? 1 : 0
+      const era = now < board.eraseUntil ? 1 : 0
+      const prs = now < board.pressUntil ? 1 : 0
+      const anyOn = pen | ret | era | prs
+      // 全部熄灭后再补写一帧 0 收尾，之后就彻底不碰这四个参数了 ——
+      // 它们同时也是用户能手动开关的表情，一直插手会跟热键打架。
+      if (anyOn || boardDirty) {
+        try {
+          core.setParameterValueById('bi', pen)
+          core.setParameterValueById('chehui', ret)
+          core.setParameterValueById('pi', era)
+          core.setParameterValueById('pointZ', prs)
+        } catch { /* ignore */ }
+        boardDirty = !!anyOn
+      }
+      // 只在三个图标真的亮/灭时记一行 —— 手按下每敲一下都会翻，不进日志
+      const tag = `${pen}${ret}${era}`
+      if (tag !== boardLogTag) {
+        boardLogTag = tag
+        api.log(`点菜板图标：笔${pen ? '亮' : '灭'} 回车${ret ? '亮' : '灭'} 橡皮${era ? '亮' : '灭'}`)
+      }
+    }
+
     if (!exprState.size) return
     for (const st of exprState.values()) {
       const w = st.weight
@@ -936,7 +1004,7 @@
    * 用 <audio> + cloneNode 是为了让同一个音效可以重叠播放（连点的时候）。
    * 自动播放限制由主进程的 autoplay-policy 开关解除。
    * ============================================================ */
-  const SFX_NAMES = ['key', 'squeak', 'happy', 'nom', 'boing', 'splash', 'sparkle', 'levelup', 'sleepy', 'no', 'wake']
+  const SFX_NAMES = ['squeak', 'happy', 'nom', 'boing', 'splash', 'sparkle', 'levelup', 'sleepy', 'no', 'wake']
   const sfxPool = new Map()
   let sfxVerified = false
 
@@ -955,7 +1023,7 @@
     api.log(`音效已装载 ${SFX_NAMES.length} 个`)
   }
 
-  function playSfx (name, gain = 1, force = false, rate = 1) {
+  function playSfx (name, gain = 1, force = false) {
     if ((!settings.sfx && !force) || !name) return
     const base = sfxPool.get(name)
     if (!base) { api.log('未知音效: ' + name); return }
@@ -963,7 +1031,6 @@
       const a = base.cloneNode()
       const vol = settings.sfxVolume == null ? 0.6 : settings.sfxVolume
       a.volume = Math.max(0, Math.min(1, vol * gain))
-      if (rate !== 1) a.playbackRate = rate
       const p = a.play()
       if (p && p.then) {
         p.then(() => {
@@ -974,27 +1041,6 @@
     } catch (e) {
       api.log('音效异常: ' + e.message)
     }
-  }
-
-  /* ---------------------------------------------------------------- *
-   * 每键的「哒」声
-   *
-   * 这是整套输入联动里最要紧的一环。表情可以一直不变，但**每敲一下都得有回应**，
-   * 否则用户会觉得桌宠根本没在工作 —— 这正是最初「反应在哪？声音也没了」的原因。
-   *
-   * 三个细节：
-   *  - 最小间隔 32ms：连打时不会叠成一团噪音，也不会漏掉明显的手速
-   *  - 每次随机 ±10% 变调：一个文件听起来才不像复读机
-   *  - 音量压到 0.42：它是背景里的「哒」，不能盖过状态切换时的音效
-   * ---------------------------------------------------------------- */
-  const KEY_SFX_MIN_GAP = 32
-  let lastKeySfxAt = 0
-
-  function playKeyTick () {
-    const now = performance.now()
-    if (now - lastKeySfxAt < KEY_SFX_MIN_GAP) return
-    lastKeySfxAt = now
-    playSfx('key', 0.42, false, 0.9 + Math.random() * 0.22)
   }
 
   /* ============================================================ *
@@ -1083,14 +1129,107 @@
    */
   const PET_LINES = ['呼噜呼噜～', '嗯……舒服', '嘿嘿', '再摸摸嘛', '（蹭了蹭你的手）']
 
-  // 点在她身上时已经有一声 squeak 了，别再叠一声「哒」
-  let lastPetClickAt = 0
-
   function reactToClick () {
-    lastPetClickAt = performance.now()
     addExpression('脸红', 'event', 2000)
     playSfx('squeak', 0.9)
     if (Math.random() < 0.45) showBubble(PET_LINES[Math.floor(Math.random() * PET_LINES.length)])
+  }
+
+  /* ============================================================ *
+   * 调试抓图（DSHPET_SHOT）
+   *
+   * 为什么不用系统截屏：桌宠是透明、无边框、始终置顶的分层窗口，
+   * GDI 的 CopyFromScreen 抓不到它（CAPTUREBLT 也只是时灵时不灵），
+   * 之前排查「看不到宠物」时在这上面浪费过很多时间。
+   * 直接从 WebGL 的 framebuffer 读像素最可靠 —— 拿到的就是真正画出来的东西，
+   * 而且能把参数压成任意值，逐张对比「这个部件打开到底是什么样」。
+   *
+   * 主进程用 DSHPET_SHOT 下发脚本，逗号分隔，每项出一张图：
+   *   base,bi=1,pi=1,pointZ=1,pointZ2=1,point=0
+   * 项名后可以跟冒号，冒号后是参数赋值（+ 分隔多个）。
+   * ============================================================ */
+  function nextFrames (n) {
+    return new Promise((resolve) => {
+      let left = n
+      const step = () => { if (--left <= 0) resolve(); else requestAnimationFrame(step) }
+      requestAnimationFrame(step)
+    })
+  }
+
+  function capturePet (name) {
+    const gl = app.renderer.gl
+    if (!gl || !gl.readPixels) return
+    const sx = gl.drawingBufferWidth / window.innerWidth
+    const sy = gl.drawingBufferHeight / window.innerHeight
+
+    // 圈住模型的粗略范围（比命中判定的框再放宽，免得把道具裁掉）
+    const boxH = petHeight * 1.7
+    const left = petX - petHeight * 0.95
+    const top = petY - petHeight * 1.45
+    const w = Math.round(petHeight * 1.9 * sx)
+    const h = Math.round(boxH * sy)
+    const px = left * sx
+    const py = gl.drawingBufferHeight - (top + boxH) * sy
+
+    const cx = Math.max(0, Math.min(gl.drawingBufferWidth - w, Math.round(px)))
+    const cy = Math.max(0, Math.min(gl.drawingBufferHeight - h, Math.round(py)))
+    const buf = new Uint8Array(w * h * 4)
+    gl.readPixels(cx, cy, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf)
+
+    // readPixels 是自下而上的，2D canvas 是自上而下的，逐行翻过来
+    const cv = document.createElement('canvas')
+    cv.width = w; cv.height = h
+    const ctx = cv.getContext('2d')
+    const img = ctx.createImageData(w, h)
+    for (let row = 0; row < h; row++) {
+      const src = (h - 1 - row) * w * 4
+      img.data.set(buf.subarray(src, src + w * 4), row * w * 4)
+    }
+    ctx.putImageData(img, 0, 0)
+    api.saveShot({ name, png: cv.toDataURL('image/png') })
+  }
+
+  async function runShotScript (spec) {
+    const steps = String(spec || 'base').split(',').map((s) => s.trim()).filter(Boolean)
+
+    // 脚本第一项写 freeze 时，先停掉所有动作等物理稳定。
+    // 否则 Idle 一直在动，off/on 两张之间人物整体位移，
+    // diff 出来的全是轮廓噪声，根本看不出参数改了什么。
+    let frozen = false
+    if (steps[0] === 'freeze') {
+      steps.shift()
+      frozen = true
+      try { model.internalModel.motionManager.stopAllMotions() } catch { /* ignore */ }
+      await nextFrames(40)
+      api.log('抓图前已冻结动作')
+    }
+
+    api.log(`抓图脚本：${steps.length} 组 → ${steps.join(' | ')}`)
+    for (const step of steps) {
+      const i = step.indexOf(':')
+      const name = i < 0 ? step : step.slice(0, i)
+      const assigns = i < 0 ? '' : step.slice(i + 1)
+
+      // 成对拍：先「关」再「开」，两张只隔几帧
+      debugParams.clear()
+      await nextFrames(frozen ? 6 : 3)
+      capturePet(`${name}-off`)
+
+      if (assigns) {
+        for (const kv of assigns.split('+')) {
+          const [id, v] = kv.split('=')
+          if (id) debugParams.set(id, Number(v === undefined ? 1 : v))
+        }
+        await nextFrames(frozen ? 6 : 3)
+        capturePet(`${name}-on`)
+        api.log(`已抓图 ${name}（${assigns}）`)
+      } else {
+        api.log(`已抓图 ${name}`)
+      }
+      await nextFrames(2)
+    }
+    debugParams.clear()
+    api.log('抓图脚本结束')
   }
 
   /* ============================================================ *
@@ -1157,19 +1296,15 @@
       }
     })
 
-    /* 每一次按键的跟手节拍：一声「哒」+ 累加一个脉冲，渲染时衰减成一下点头 */
+    /* 每一次按键的跟手节拍：累加一个脉冲（点头）+ 点亮板子上对应的图标 */
     api.onKeyPulse((p) => {
       if (!p) return
-      if (!pulseSeen) { pulseSeen = true; api.log(`跟手脉冲已收到（gain=${p.gain}）`) }
-      keyPulse = Math.min(2.6, keyPulse + (p.gain || 1))
-      playKeyTick()
-    })
-
-    /* 鼠标点一下也算一次「哒」—— 点桌面、点按钮都该有回应。
-       点在她自己身上的那一下除外：那种情况上面已经响过 squeak 了。 */
-    api.onClickPulse(() => {
-      if (performance.now() - lastPetClickAt < 400) return
-      playKeyTick()
+      if (!pulseSeen) {
+        pulseSeen = true
+        api.log(`跟手脉冲已收到（gain=${p.gain}, key=${p.key || '未映射'}）`)
+      }
+      keyPulse = Math.min(2, keyPulse + (p.gain || 1))
+      boardOnKey(p.key)
     })
 
     api.onSize((h) => {
@@ -1212,6 +1347,9 @@
     })
 
     api.onSfxTest(() => playSfx('sparkle', 1, true))
+
+    /* 调试抓图：见上面 capturePet */
+    api.onShot((spec) => { runShotScript(spec) })
   }
 
   /* ============================================================ *

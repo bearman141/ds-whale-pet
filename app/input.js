@@ -66,9 +66,9 @@ const REACTIONS = [
     pulse: 1.4,
   },
   {
-    id: 'excited', priority: 70, emoji: '🤩', name: '被你带嗨了', sfx: 'happy',
+    id: 'excited', priority: 70, emoji: '🤩', name: '被你带嗨了', sfx: null,
     when: (s) => s.keysPerSec >= RATE_EXCITED,
-    reason: '你打字快得飞起（≥ 5 键/秒）',
+    reason: '你打字快得飞起（≥ 4 键/秒）',
     expressions: ['星星眼'],
     bubbles: ['哇，好快！', '（跟着你的节奏抖）', '手速好猛！'],
     motions: ['自拍简单'],

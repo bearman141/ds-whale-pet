@@ -473,15 +473,14 @@ function startUiohook () {
   const rawLog = !!process.env.DSHPET_INPUTDEBUG
   const rawCount = { key: 0, click: 0, wheel: 0, move: 0 }
 
-  uIOhook.on('keydown', () => {
+  uIOhook.on('keydown', (e) => {
     const now = Date.now()
     if (rawLog) { rawCount.key++; log(`[raw] keydown #${rawCount.key}`) }
-    if (input) { input.key(now); sendKeyPulse(now) }
+    if (input) { input.key(now); sendKeyPulse(now, keyTokenByCode.get(e.keycode)) }
   })
   uIOhook.on('mousedown', () => {
     if (rawLog) { rawCount.click++; log(`[raw] mousedown #${rawCount.click}`) }
     if (input) input.click(Date.now())
-    sendClickPulse()
   })
   uIOhook.on('wheel', () => {
     if (rawLog) { rawCount.wheel++; log(`[raw] wheel #${rawCount.wheel}`) }
@@ -620,6 +619,7 @@ let inputTimer = null
 let inputDebugTimer = null
 let lastPulseSent = 0
 let lastBubbleAt = 0
+let shotDir = null          // DSHPET_SHOT 的落盘目录
 
 const INPUT_TICK_MS = 500
 const PULSE_MIN_GAP_MS = 28        // 跟手节拍最多 ~35 次/秒：够跟手，又不刷爆 IPC
@@ -710,25 +710,61 @@ function startDemoLoop () {
   }, 4000)
 }
 
-/** 每次按键的跟手节拍：渲染层会把它衰减成一下轻微的点头 */
-function sendKeyPulse (now) {
-  if (!settings.inputReact || !input) return
-  if (!win || win.isDestroyed()) return
-  if (now - lastPulseSent < PULSE_MIN_GAP_MS) return
-  lastPulseSent = now
-  win.webContents.send('pet:keypulse', { gain: input.pulseGain() })
+/**
+ * 调试抓图（DSHPET_SHOT=...）
+ *
+ * 详见 renderer/pet.js 的 capturePet：从 WebGL framebuffer 直接读像素，
+ * 因为桌宠是透明分层窗口，系统截屏抓不到它。
+ *
+ *   DSHPET_SHOT="base,bi=1,pointZ=1"  DSHPET_SHOT_DIR=D:\shots  npm start
+ */
+function startShotScript () {
+  const spec = process.env.DSHPET_SHOT
+  if (!spec) return
+  shotDir = process.env.DSHPET_SHOT_DIR || path.join(__dirname, '..', 'shots')
+  try { fs.mkdirSync(shotDir, { recursive: true }) } catch { /* ignore */ }
+  log(`抓图模式：${shotDir}`)
+  // 等模型、物理、Idle 动作都稳定下来再抓，否则第一张永远是加载中的样子
+  setTimeout(() => {
+    if (win && !win.isDestroyed()) win.webContents.send('pet:shot', spec)
+  }, 6000)
 }
 
 /**
- * 每次鼠标按下的轻响
+ * 假按键（DSHPET_FAKEKEYS=A,B,Enter,Backspace）
  *
- * 和按键共用同一个「哒」：点桌面、点按钮、点她，都该有回应。
- * 渲染层自己会按 settings.sfx 决定放不放，这里只管转发。
+ * 这台机器会拒绝合成输入（见 tools/inputcheck.ps1），所以自动化测试里既敲不了
+ * 真键盘也伪造不了键。这个开关直接走 sendKeyPulse 这条真实链路把按键喂给渲染层，
+ * 用来验证「主进程 → 渲染层 → 点菜板图标」这一段接线。
+ * 它只验证这一段，不验证全局钩子 —— 钩子得靠真人按键或用 DSHPET_INPUTDEBUG 看。
  */
-function sendClickPulse () {
-  if (!settings.inputReact) return
+function startFakeKeys () {
+  const keys = String(process.env.DSHPET_FAKEKEYS).split(',').map((s) => s.trim()).filter(Boolean)
+  if (!keys.length) return
+  let i = 0
+  log(`假按键已开启：${keys.join(' ')}（每 2.5 秒一个）`)
+  setInterval(() => {
+    const k = keys[i % keys.length]
+    i++
+    sendKeyPulse(Date.now(), k === '_' ? null : k)
+  }, 2500)
+}
+
+/** 每次按键的跟手节拍。
+ *
+ * 除了幅度，还要把**是哪个键**告诉渲染层 —— 点菜板上的三个图标靠它区分：
+ * 打字 → 笔亮，回车 → ↩ 亮，退格/Delete → 橡皮亮。
+ * token 可能为 null（没映射到的键），渲染层按「正在打字」处理。
+ */
+function sendKeyPulse (now, token) {
+  if (!settings.inputReact || !input) return
   if (!win || win.isDestroyed()) return
-  win.webContents.send('pet:clickpulse', {})
+  // 回车 / 退格是「一按就要亮」的，别被节流吃掉；其余的按 28ms 合并
+  const special = token === 'Enter' || token === 'NumEnter' ||
+    token === 'Backspace' || token === 'Del'
+  if (!special && now - lastPulseSent < PULSE_MIN_GAP_MS) return
+  lastPulseSent = now
+  win.webContents.send('pet:keypulse', { gain: input.pulseGain(), key: token || null })
 }
 
 /** 把表现指令转给渲染进程（原来这个函数还兼着写养成日志，现在只做转发） */
@@ -1161,6 +1197,21 @@ function quitApp () {
 function setupIpc () {
   ipcMain.on('pet:log', (_e, msg) => log('[pet]', msg))
 
+  // 调试抓图：渲染层把 dataURL 发上来，这里落盘成 png。
+  // 放在主进程写，是因为渲染层没有（也不该有）任意路径的写权限。
+  ipcMain.on('pet:shot-save', (_e, payload) => {
+    if (!payload || !payload.png || !shotDir) return
+    const name = String(payload.name || 'shot').replace(/[^\w.-]/g, '_')
+    const b64 = String(payload.png).replace(/^data:image\/png;base64,/, '')
+    const file = path.join(shotDir, `${name}.png`)
+    try {
+      fs.writeFileSync(file, Buffer.from(b64, 'base64'))
+      log(`[shot] ${file}`)
+    } catch (e) {
+      log('[shot] 写入失败:', e.message)
+    }
+  })
+
   ipcMain.on('pet:interactive', (_e, on) => {
     if (menuOpen) { log('忽略可交互请求：菜单正打开着'); return }
     setInteractive(on)
@@ -1369,6 +1420,8 @@ if (!app.requestSingleInstanceLock()) {
     startCursorPoll()
     startAlwaysOnTopWatch()
     if (process.env.DSHPET_DEMO) startDemoLoop()
+    startShotScript()
+    if (process.env.DSHPET_FAKEKEYS) startFakeKeys()
 
     screen.on('display-metrics-changed', () => {
       if (!win || win.isDestroyed()) return

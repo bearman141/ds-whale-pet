@@ -23,8 +23,6 @@ contextBridge.exposeInMainWorld('petAPI', {
   onReact: (fn) => ipcRenderer.on('pet:react', (_e, r) => fn(r)),
   /** 每一次按键的跟手节拍 */
   onKeyPulse: (fn) => ipcRenderer.on('pet:keypulse', (_e, p) => fn(p)),
-  /** 每一次鼠标按下（全局，不只是点在模型上） */
-  onClickPulse: (fn) => ipcRenderer.on('pet:clickpulse', (_e, p) => fn(p)),
   onEvents: (fn) => ipcRenderer.on('pet:events', (_e, ev) => fn(ev)),
 
   /* ---- 聊天 ---- */
@@ -49,4 +47,8 @@ contextBridge.exposeInMainWorld('petAPI', {
   onBubbleSetting: (fn) => ipcRenderer.on('pet:bubbleSetting', (_e, on) => fn(on)),
   onSfxSetting: (fn) => ipcRenderer.on('pet:sfxSetting', (_e, s) => fn(s)),
   onSfxTest: (fn) => ipcRenderer.on('pet:sfx-test', () => fn()),
+
+  /* ---- 调试抓图 ---- */
+  onShot: (fn) => ipcRenderer.on('pet:shot', (_e, spec) => fn(spec)),
+  saveShot: (payload) => ipcRenderer.send('pet:shot-save', payload),
 })
