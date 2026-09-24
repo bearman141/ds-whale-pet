@@ -166,6 +166,10 @@
   const bubble = document.getElementById('bubble')
   const bubbleText = document.getElementById('bubble-text')
   const hint = document.getElementById('hint')
+  const hud = document.getElementById('hud')
+  const hudReact = document.getElementById('hud-react')
+  const hudSpeed = document.getElementById('hud-speed')
+  const hudIdle = document.getElementById('hud-idle')
   const panelsEl = document.getElementById('panels')
   let bubbleTimer = null
 
@@ -469,6 +473,9 @@
     bubble.style.top = top + 'px'
     hint.style.left = petX + 'px'
     hint.style.top = top + 'px'
+    // 状态条挂在**脚下**：头顶要留给气泡，而且脚边更不挡视线
+    hud.style.left = petX + 'px'
+    hud.style.top = Math.min(workArea.y + workArea.height - 24, petY + 10) + 'px'
   }
 
   /* ============================================================ *
@@ -1381,6 +1388,24 @@
     api.onBubbleSetting((on) => {
       settings.bubble = on
       if (!on) bubble.classList.add('hidden')
+    })
+
+    /* 常驻状态条：打字速度这类读数必须抬头就能看见，藏进菜单等于没有 */
+    api.onHud((h) => {
+      if (!h) { hud.classList.add('hidden'); return }
+      hud.classList.remove('hidden')
+      hudReact.textContent = `${h.emoji} ${h.name}`
+      const hot = h.keysPerSec >= 4
+      hudSpeed.innerHTML = `⌨️ <span class="num${hot ? ' hot' : ''}">${h.keysPerSec.toFixed(1)}</span> 键/秒`
+      // 正在打字时不显示「0s 没动」——那句话只在真的闲下来之后才有意义
+      hudIdle.innerHTML = h.clicksRecent > 0
+        ? `👆 <span class="num">${h.clicksRecent}</span> 次`
+        : (h.idleSeconds >= 5 ? `<span class="idle">${h.idleSeconds}s 没动</span>` : '')
+    })
+
+    api.onHudSetting((on) => {
+      settings.hud = !!on
+      if (!on) hud.classList.add('hidden')
     })
 
     api.onSfxSetting((s) => {

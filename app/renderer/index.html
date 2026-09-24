@@ -13,6 +13,13 @@
   <!-- 触发动作时的小气泡 -->
   <div id="bubble" class="hidden"><span id="bubble-text"></span></div>
 
+  <!-- 常驻状态条：挂在宠物旁边，抬头就能看见打字速度 -->
+  <div id="hud" class="hidden">
+    <span id="hud-react"></span>
+    <span id="hud-speed"></span>
+    <span id="hud-idle"></span>
+  </div>
+
   <!-- 首次运行提示 -->
   <div id="hint" class="hidden">
     <b>你好呀，我是 DS鲸鱼娘 🐋</b>
@@ -104,6 +111,10 @@
           <input type="checkbox" id="s-hotkeys">
         </label>
         <label class="s-row"><span>触发气泡<em>她说话时冒的小方框</em></span><input type="checkbox" id="s-bubble"></label>
+        <label class="s-row">
+          <span>状态条<em>她脚下那条实时读数（打字速度 / 点击 / 空闲）</em></span>
+          <input type="checkbox" id="s-hud">
+        </label>
 
         <div class="s-group">声音</div>
         <label class="s-row"><span>互动音效</span><input type="checkbox" id="s-sfx"></label>

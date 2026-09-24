@@ -23,7 +23,7 @@
   if (!box) return
 
   // 和主进程 settingsView() 的键一一对应
-  const TOGGLES = ['alwaysOnTop', 'clickThrough', 'inputReact', 'hotkeys', 'bubble', 'sfx', 'autoLaunch']
+  const TOGGLES = ['alwaysOnTop', 'clickThrough', 'inputReact', 'hotkeys', 'bubble', 'hud', 'sfx', 'autoLaunch']
 
   let visible = false
   let posTimer = null

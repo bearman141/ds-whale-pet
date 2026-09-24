@@ -48,6 +48,9 @@ contextBridge.exposeInMainWorld('petAPI', {
   /** 可交互期间主进程轮询来的真实光标位置（此时 mousemove 不再转发） */
   onCursor: (fn) => ipcRenderer.on('pet:cursor', (_e, p) => fn(p)),
   onBubbleSetting: (fn) => ipcRenderer.on('pet:bubbleSetting', (_e, on) => fn(on)),
+  /** 宠物旁边常驻状态条的内容（打字速度等） */
+  onHud: (fn) => ipcRenderer.on('pet:hud', (_e, h) => fn(h)),
+  onHudSetting: (fn) => ipcRenderer.on('pet:hudSetting', (_e, on) => fn(on)),
   onSfxSetting: (fn) => ipcRenderer.on('pet:sfxSetting', (_e, s) => fn(s)),
   onSfxTest: (fn) => ipcRenderer.on('pet:sfx-test', () => fn()),
 

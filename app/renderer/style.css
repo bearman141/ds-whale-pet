@@ -56,6 +56,41 @@ html, body {
 
 #bubble.hidden { opacity: 0; transform: translate(-50%, -85%); }
 
+/* ================= 常驻状态条 =================
+   挂在宠物下方，抬头就能看见打字速度。
+   pointer-events:none —— 它绝不能挡住点宠物，也不参与
+   pet.js 里的面板命中判定（那只认 #panels .card）。 */
+#hud {
+  position: fixed;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(120, 190, 235, 0.85);
+  box-shadow: 0 2px 9px rgba(10, 40, 70, 0.22);
+  color: #23405c;
+  font-size: 11.5px;
+  line-height: 1.3;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+#hud.hidden { opacity: 0; }
+
+#hud .num {
+  font-weight: 700;
+  color: #1b6fa8;
+  font-variant-numeric: tabular-nums;
+}
+#hud .idle { color: #93a7b5; }
+#hud .hot { color: #e2607f; }
+
 /* ================= 首次提示 ================= */
 #hint {
   position: fixed;

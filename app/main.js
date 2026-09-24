@@ -88,6 +88,7 @@ const DEFAULT_SETTINGS = {
   sfx: true,            // 互动音效
   sfxVolume: 0.6,       // 0..1
   inputReact: true,     // 跟随你的键鼠操作做反应
+  hud: true,            // 宠物旁边常驻的状态条（打字速度等）
 }
 
 function loadSettings () {
@@ -644,9 +645,33 @@ function reactPayload (rule, extra = {}) {
   }
 }
 
+/**
+ * 宠物旁边那条常驻读数的内容。
+ *
+ * 为什么单独发一条而不是塞进 pet:react：
+ * 反应是「变化才发」的事件，而状态条是个**一直要更新的读数** ——
+ * 你不打字的时候键/秒要慢慢掉回 0，光靠事件推是推不出来的。
+ */
+function sendHud (stats, rule) {
+  if (!settings.hud) return
+  if (!win || win.isDestroyed() || !rule || !stats) return
+  win.webContents.send('pet:hud', {
+    emoji: rule.emoji,
+    name: rule.name,
+    keysPerSec: stats.keysPerSec,
+    clicksRecent: stats.clicksRecent,
+    idleSeconds: stats.idleSeconds,
+  })
+}
+
 function inputTick () {
   if (!input) return
   const { rule, stats, changed } = input.evaluate()
+
+  // 状态条每次 tick 都要发（它是个一直看得见的读数），
+  // 而下面那些表现只在反应**变化**时才发。
+  sendHud(stats, rule)
+
   if (!changed) return
 
   const now = Date.now()
@@ -668,6 +693,7 @@ function startInputLoop () {
   input = new InputTracker()
   const { rule } = input.evaluate()
   sendReact(reactPayload(rule, { stats: input.snapshot() }))
+  sendHud(input.snapshot(), rule)
   clearInterval(inputTimer)
   inputTimer = setInterval(inputTick, INPUT_TICK_MS)
   log(`输入联动已启动（每 ${INPUT_TICK_MS} ms 评估一次）`)
@@ -755,6 +781,9 @@ function startFakeKeys () {
   setInterval(() => {
     const k = keys[i % keys.length]
     i++
+    // 同时喂追踪器：这样「打字速度」这类统计也会动起来，
+    // 否则只能验证渲染层，状态条永远是 0.0 键/秒。
+    if (input) input.key(Date.now())
     sendKeyPulse(Date.now(), k === '_' ? null : k)
   }, interval)
 }
@@ -768,7 +797,7 @@ function startFakeKeys () {
  */
 function startPageShot () {
   const which = process.env.DSHPET_PAGESHOT
-  if (!which) return
+  if (which !== 'chat' && which !== 'settings') return
   shotDir = process.env.DSHPET_SHOT_DIR || path.join(__dirname, '..', 'shots')
   try { fs.mkdirSync(shotDir, { recursive: true }) } catch { /* ignore */ }
   setTimeout(() => {
@@ -1113,6 +1142,10 @@ function applySetting (key, value) {
     case 'sfxVolume':
       win?.webContents.send('pet:sfxSetting', { enabled: settings.sfx, volume: settings.sfxVolume })
       break
+    case 'hud':
+      win?.webContents.send('pet:hudSetting', !!value)
+      if (!value) win?.webContents.send('pet:hud', null)
+      break
     default:
       break
   }
@@ -1136,6 +1169,7 @@ function settingsView () {
     bubble: !!settings.bubble,
     sfx: !!settings.sfx,
     sfxVolume: settings.sfxVolume == null ? 0.6 : settings.sfxVolume,
+    hud: !!settings.hud,
     autoLaunch: isAutoLaunchOn(),
     size: settings.size || 'custom',
   }
