@@ -136,7 +136,6 @@ section('离开又回来')
   const r = t.evaluate(at(1000 + WAKE_IDLE_MS + 31000))
   eq(r.rule.id, 'back', '离开一阵再动键鼠 → 你回来啦')
   ok(r.stats.wokeSecondsAgo !== null && r.stats.wokeSecondsAgo < 6, '刚醒来的秒数很小', r.stats.wokeSecondsAgo)
-  eq(r.rule.sfx, 'wake', '回来时有起床音效')
 
   // 6 秒之后就恢复正常
   const later = t.evaluate(at(1000 + WAKE_IDLE_MS + 31000 + 7000))

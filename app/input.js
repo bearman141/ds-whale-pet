@@ -38,7 +38,7 @@ const RATE_TYPING = 0.8
 
 const REACTIONS = [
   {
-    id: 'sleeping', priority: 100, emoji: '💤', name: '睡着了', sfx: null,
+    id: 'sleeping', priority: 100, emoji: '💤', name: '睡着了',
     when: (s) => s.idleSeconds > SLEEP_IDLE_MS / 1000,
     reason: '你已经 10 分钟没碰键鼠了',
     expressions: ['闭眼口水'],
@@ -47,7 +47,7 @@ const REACTIONS = [
     pulse: 0,
   },
   {
-    id: 'dozing', priority: 80, emoji: '😪', name: '犯困', sfx: 'sleepy',
+    id: 'dozing', priority: 80, emoji: '😪', name: '犯困',
     // 深夜也要「相对安静」才算犯困 —— 否则凌晨三点猛敲键盘她还在打哈欠，很出戏
     when: (s, c) => s.idleSeconds > DOZE_IDLE_MS / 1000 || (c.lateNight && s.idleSeconds > 30),
     reason: '有点安静，或者是深夜',
@@ -57,7 +57,7 @@ const REACTIONS = [
     pulse: 0.4,
   },
   {
-    id: 'back', priority: 75, emoji: '❗', name: '你回来啦', sfx: 'wake',
+    id: 'back', priority: 75, emoji: '❗', name: '你回来啦',
     when: (s) => s.wokeSecondsAgo !== null && s.wokeSecondsAgo < 6,
     reason: '你离开一阵子又动了键鼠',
     expressions: ['感叹号'],
@@ -66,7 +66,7 @@ const REACTIONS = [
     pulse: 1.4,
   },
   {
-    id: 'excited', priority: 70, emoji: '🤩', name: '被你带嗨了', sfx: null,
+    id: 'excited', priority: 70, emoji: '🤩', name: '被你带嗨了',
     when: (s) => s.keysPerSec >= RATE_EXCITED,
     reason: '你打字快得飞起（≥ 4 键/秒）',
     expressions: ['星星眼'],
@@ -75,7 +75,7 @@ const REACTIONS = [
     pulse: 1.8,
   },
   {
-    id: 'working', priority: 60, emoji: '⌨️', name: '在陪你打字', sfx: null,
+    id: 'working', priority: 60, emoji: '⌨️', name: '在陪你打字',
     when: (s) => s.keysPerSec >= RATE_TYPING,
     reason: '你正在敲键盘',
     expressions: [],
@@ -84,7 +84,7 @@ const REACTIONS = [
     pulse: 1.0,
   },
   {
-    id: 'clicky', priority: 50, emoji: '👆', name: '被戳了', sfx: 'squeak',
+    id: 'clicky', priority: 50, emoji: '👆', name: '被戳了',
     when: (s) => s.clicksRecent >= 3,
     reason: '你连着点鼠标',
     expressions: ['调皮'],
@@ -93,7 +93,7 @@ const REACTIONS = [
     pulse: 1.2,
   },
   {
-    id: 'scrolling', priority: 45, emoji: '🌀', name: '跟着滚', sfx: null,
+    id: 'scrolling', priority: 45, emoji: '🌀', name: '跟着滚',
     when: (s) => s.wheelRecent > 0,
     reason: '你在滚轮',
     expressions: ['问号'],
@@ -102,7 +102,7 @@ const REACTIONS = [
     pulse: 0.9,
   },
   {
-    id: 'idle', priority: 0, emoji: '🐋', name: '陪着你', sfx: null,
+    id: 'idle', priority: 0, emoji: '🐋', name: '陪着你',
     when: () => true,
     reason: '没什么特别的输入',
     expressions: [],
@@ -239,10 +239,9 @@ class InputTracker {
     return { rule: hit, stats, changed: true }
   }
 
-  /** 该不该出声（bubble / 音效）—— 克制：只在状态切换时给一次 */
+  /** 状态切换时要冒的台词 —— 克制：只在切换时给一次 */
   greeting (now = Date.now()) {
-    const r = this.reaction
-    return { text: pick(r.bubbles), sfx: r.sfx || null }
+    return { text: pick(this.reaction.bubbles) }
   }
 
   /** 跟手节拍：当前反应下每次按键应该抖多少 */

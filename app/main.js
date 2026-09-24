@@ -67,9 +67,6 @@ if (has('angle-d3d9')) app.commandLine.appendSwitch('use-angle', 'd3d9')
 if (has('inprocgpu')) app.commandLine.appendSwitch('in-process-gpu')
 if (VARIANT) log('调试变体:', VARIANT)
 
-// 音效要在没有用户手势的情况下就能播（她自己是不会「先点一下页面」的）
-app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
-
 /* ================================================================== *
  * 设置
  * ================================================================== */
@@ -85,8 +82,6 @@ const DEFAULT_SETTINGS = {
   hotkeys: true,        // 全局热键总开关
   bubble: true,         // 触发时显示气泡
   showHint: true,       // 首次运行提示
-  sfx: true,            // 互动音效
-  sfxVolume: 0.6,       // 0..1
   inputReact: true,     // 跟随你的键鼠操作做反应
   hud: true,            // 宠物旁边常驻的状态条（打字速度等）
 }
@@ -94,7 +89,18 @@ const DEFAULT_SETTINGS = {
 function loadSettings () {
   try {
     const raw = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))
-    return { ...DEFAULT_SETTINGS, ...raw }
+    const out = { ...DEFAULT_SETTINGS }
+    for (const k of Object.keys(DEFAULT_SETTINGS)) {
+      if (raw[k] !== undefined) out[k] = raw[k]
+    }
+    // 只认 DEFAULT_SETTINGS 里有的键：老版本留下的字段（比如已经整个删掉的
+    // 音效开关 sfx / sfxVolume）顺手清掉，别让它一直躺在配置文件里。
+    const stale = Object.keys(raw).filter((k) => !(k in DEFAULT_SETTINGS))
+    if (stale.length) {
+      log(`配置里有 ${stale.length} 个已废弃字段，已清除：${stale.join(', ')}`)
+      try { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(out, null, 2)) } catch { /* ignore */ }
+    }
+    return out
   } catch {
     return { ...DEFAULT_SETTINGS }
   }
@@ -640,7 +646,6 @@ function reactPayload (rule, extra = {}) {
     expressions: rule.expressions,
     pulseGain: rule.pulse,
     bubble: null,
-    sfx: null,
     ...extra,
   }
 }
@@ -684,7 +689,6 @@ function inputTick () {
 
   sendReact(reactPayload(rule, {
     bubble: allowBubble ? greet.text : null,
-    sfx: greet.sfx,
     stats,
   }))
 }
@@ -715,8 +719,8 @@ function startInputLoop () {
  * 演示模式（DSHPET_DEMO=1）：每 4 秒轮播一个反应，不依赖任何真实输入。
  *
  * 存在的意义有两个：
- *  - 验证「反应 → 表情层 + 台词 + 音效」这条链路本身是通的。
- *    桌宠不吭声时，必须先分清是「钩子没收到输入」还是「渲染层没表现」，
+ *  - 验证「反应 → 表情层 + 台词」这条链路本身是通的。
+ *    桌宠没表现时，必须先分清是「钩子没收到输入」还是「渲染层没表现」，
  *    否则只能瞎猜。
  *  - 给你看一眼到底设计了哪些反应、分别长什么样。
  */
@@ -731,8 +735,8 @@ function startDemoLoop () {
       ? rule.bubbles[Math.floor(Math.random() * rule.bubbles.length)]
       : null
     log(`演示 -> ${rule.emoji} ${rule.name}｜表情 [${rule.expressions.join(',') || '无'}]` +
-      `｜音效 ${rule.sfx || '无'}｜台词 ${bubble || '无'}`)
-    sendReact(reactPayload(rule, { bubble, sfx: rule.sfx, stats: input ? input.snapshot() : null }))
+      `｜台词 ${bubble || '无'}`)
+    sendReact(reactPayload(rule, { bubble, stats: input ? input.snapshot() : null }))
   }, 4000)
 }
 
@@ -1130,17 +1134,13 @@ function applySetting (key, value) {
       if (!value) {
         sendReact({
           id: 'idle', name: '陪着你', emoji: '🐋', reason: '输入联动已关闭',
-          expressions: [], pulseGain: 0.7, bubble: null, sfx: null,
+          expressions: [], pulseGain: 0.7, bubble: null,
         })
       }
       startHotkeys()      // 钩子可能因为两个开关都关着而没装，重开
       break
     case 'bubble':
       win?.webContents.send('pet:bubbleSetting', !!value)
-      break
-    case 'sfx':
-    case 'sfxVolume':
-      win?.webContents.send('pet:sfxSetting', { enabled: settings.sfx, volume: settings.sfxVolume })
       break
     case 'hud':
       win?.webContents.send('pet:hudSetting', !!value)
@@ -1167,8 +1167,6 @@ function settingsView () {
     inputReact: !!settings.inputReact,
     hotkeys: !!settings.hotkeys,
     bubble: !!settings.bubble,
-    sfx: !!settings.sfx,
-    sfxVolume: settings.sfxVolume == null ? 0.6 : settings.sfxVolume,
     hud: !!settings.hud,
     autoLaunch: isAutoLaunchOn(),
     size: settings.size || 'custom',
@@ -1253,7 +1251,6 @@ function setupIpc () {
       case 'reset-position': resetPosition(); break
       case 'open-model-dir': shell.openPath(MODEL_DIR); break
       case 'open-readme': openReadme(); break
-      case 'sfx-test': win?.webContents.send('pet:sfx-test', {}); break
       case 'reset': fireAction({ kind: 'reset', target: '', label: '按键归位' }); break
       default: break
     }

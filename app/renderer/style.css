@@ -206,37 +206,6 @@ html, body {
 .s-row input[type="checkbox"]:checked { background: #4aa8dd; }
 .s-row input[type="checkbox"]:checked::after { transform: translateX(15px); }
 
-.s-slider { cursor: default; gap: 6px; }
-.s-slider input[type="range"] {
-  flex: none;
-  width: 116px;
-  height: 4px;
-  appearance: none;
-  -webkit-appearance: none;
-  border-radius: 2px;
-  background: rgba(120, 190, 235, 0.45);
-  outline: none;
-  cursor: pointer;
-}
-.s-slider input[type="range"]::-webkit-slider-thumb {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  background: #4aa8dd;
-  box-shadow: 0 1px 3px rgba(10, 40, 70, 0.35);
-  cursor: pointer;
-}
-.s-slider b {
-  flex: none;
-  width: 24px;
-  text-align: right;
-  font-size: 11px;
-  font-weight: 600;
-  color: #55707f;
-}
-
 #settings .c-row { margin-top: 6px; }
 
 /* ================= 通用头部 ================= */

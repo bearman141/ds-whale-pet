@@ -6,7 +6,7 @@
 安静太久她会犯困甚至睡着、你离开一阵再回来她会打招呼。
 
 互动思路参考了 [BongoCat](https://github.com/ayangweb/BongoCat)（那只要跟着你敲键盘的猫）；
-另外还接了自己的大模型聊天、一套互动音效，以及完整的模型原版按键表。
+另外还接了自己的大模型聊天，以及完整的模型原版按键表。
 
 技术栈：Electron 31 + PIXI 6 + pixi-live2d-display 0.4（Cubism 4）+ uiohook-napi（全局键鼠钩子）。
 
@@ -257,37 +257,11 @@ DeepSeek / OpenAI / Moonshot / 智谱 / Ollama / LM Studio / one-api 都能用�
 
 ---
 
-## 六、互动音效
-
-每类**状态变化**配一个音效，基调是「捏橡皮小黄鸭」。
-
-> 注意这里的分寸：**声音只用来标记状态变化，不用来表示「你正在打字」。**
-> 试过每按一下键响一声「哒」，打字时一直在响，很吵 —— 输入反馈应该是看得见的。
-
-| 音效 | 触发 | 素材 |
-| --- | --- | --- |
-| 🦆 squeak | 摸摸头 / 点她 | Mixkit **Rubber duck squeak** |
-| 😴 sleepy | 犯困 | Mixkit Cartoon vocal yawn |
-| ⏰ wake | 你离开又回来 | Mixkit Cartoon toy whistle |
-| 😋 nom / 🎾 boing / 🛁 splash | 旧互动保留 | Mixkit Chewing / Boing hit / Water splash |
-| ✨ sparkle / 🎉 levelup | 旧互动保留 | Mixkit Magic wand sparkle / Achievement bell |
-| 🚫 no | 操作被拒 | Mixkit Cartoon failure piano |
-
-Mixkit 那 10 个素材来自 [Mixkit](https://mixkit.co/free-sound-effects/)（[Mixkit Free License](https://mixkit.co/license/#sfxFree)），
-`tools/fetch-sfx.ps1` 可复现地重新下载并处理（去头静音 → 裁剪 → 压缩器 →
-`loudnorm` → 尾淡出 → 单声道 22.05kHz/96kbps mp3），10 个共 **147 KB**。
-
-处理时踩过一个坑：一开始按**峰值**归一化，结果 10 个素材的平均响度差了 18 dB
-（`boing` −14 vs `nom` −32），`nom` 小到听不见；改成按响度归一后 `loudnorm` 单遍模式
-对这么短的音频又不准，于是加了第二遍实测修正，最终 8 个精确落在 −20.5 dB。
-
-开关和音量在菜单里：「🔊 互动音效」+「🔉 音效音量」（小/中/大，带试听）。
-
-### 排障开关
+## 六、排障开关
 
 改这个桌宠最难受的一点是**看不见也摸不着**：它是透明分层窗口（系统截屏抓不到），
 它跟的是全局键鼠（没有真人按键就没有输入），而这台开发机还会直接拒绝合成输入。
-下面四个开关就是为了把这三件事拆开。
+下面这几组开关就是为了把这三件事拆开。
 
 **1. 分清「钩子没收到输入」还是「收到了但没表现」**
 
@@ -300,7 +274,7 @@ $env:DSHPET_DEMO = "1"; npm start
 ```
 
 `DSHPET_DEMO=1` 会把 8 个反应依次演一遍，日志里同时给出
-`演示 -> 💤 睡着了｜表情 [闭眼口水]｜音效 无｜台词 Zzz……`。
+`演示 -> 💤 睡着了｜表情 [闭眼口水]｜台词 Zzz……`。
 
 `DSHPET_INPUTDEBUG=1` 的心跳长这样：
 
@@ -377,17 +351,15 @@ deskpet/
 │  │  ├─ chat.js        聊天面板
 │  │  └─ settings.js    「其他设置」面板（三级窗口）
 │  ├─ vendor/           live2dcubismcore + pixi + pixi-live2d-display
-│  ├─ sfx/              10 个互动音效（mp3，共 147 KB）
 │  ├─ model/            模型资源（moc3 / 贴图 / 物理 / 44 表情 / 8 动作）
 │  ├─ tools/
 │  │  ├─ make-model3.js   生成 model3.json + 修正动作 Loop 标记
-│  │  ├─ make-sfx.js      程序合成音效（备选方案，输出 wav）
 │  │  ├─ param-range.js   列出某参数在动作/表情里的取值范围（摸清自带部件用）
 │  │  ├─ hookprobe.js     脱离 Electron 单独验证全局钩子收不收得到事件
 │  │  ├─ test-input.js    输入联动测试（48 条断言）
 │  │  └─ test-chat.js     聊天模块测试（83 条断言，含 SSE 流式解析）
 │  └─ assets/icon.png
-└─ tools/               调试脚本（截屏 / 键鼠注入 / 假的 LLM 服务 / 音效抓取）
+└─ tools/               调试脚本（截屏 / 键鼠注入 / 假的 LLM 服务）
 ```
 
 ---
@@ -510,6 +482,9 @@ Cubism 运行时只读 `model3.json`，所以 `app/tools/make-model3.js` 会把 
 - `mousekey.ps1 move|click x y | type "文字" | pos` —— 注入鼠标/键盘。
   坐标是**物理像素**（125% 缩放要 ×1.25）；移动必须走 `SendInput`，
   `SetCursorPos` 不产生 Electron `forward` 依赖的底层鼠标事件
+- `inputcheck.ps1` —— 注入端自检：当前进程到底能不能合成键鼠输入。
+  有些环境（这台开发机就是）会直接拒绝 `SetCursorPos`，
+  这时候「桌宠没反应」和桌宠本身无关，别再去改代码
 - `mock-llm.js [port]` —— 假的 OpenAI 兼容服务，不需要真 key 就能端到端测聊天链路
 
 ---

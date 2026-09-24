@@ -51,8 +51,6 @@ contextBridge.exposeInMainWorld('petAPI', {
   /** 宠物旁边常驻状态条的内容（打字速度等） */
   onHud: (fn) => ipcRenderer.on('pet:hud', (_e, h) => fn(h)),
   onHudSetting: (fn) => ipcRenderer.on('pet:hudSetting', (_e, on) => fn(on)),
-  onSfxSetting: (fn) => ipcRenderer.on('pet:sfxSetting', (_e, s) => fn(s)),
-  onSfxTest: (fn) => ipcRenderer.on('pet:sfx-test', () => fn()),
 
   /* ---- 其他设置（三级窗口） ---- */
   onSettingsPanel: (fn) => ipcRenderer.on('pet:settings-panel', (_e, p) => fn(p)),

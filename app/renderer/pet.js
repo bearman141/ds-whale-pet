@@ -216,11 +216,9 @@
     startTicker()
     bindPointer()
     bindIpc()
-    initSfx()
     playIdle()
 
-    // 养成系统：开局先把当前情绪的条件结果套上
-    // 输入联动：开局先把主进程算出来的当前反应套上
+    // 开局先把主进程算出来的当前反应套上
     if (init.react) applyReact(init.react)
 
     if (settings.showHint) {
@@ -1049,54 +1047,6 @@
   }
 
   /* ============================================================ *
-   * 互动音效
-   *
-   * 音效全部由 app/tools/make-sfx.js 程序合成 —— 不引外部素材，
-   * 所以授权可以跟着 MIT 走（下载来的「免费音效」大多禁止再分发）。
-   *
-   * 用 <audio> + cloneNode 是为了让同一个音效可以重叠播放（连点的时候）。
-   * 自动播放限制由主进程的 autoplay-policy 开关解除。
-   * ============================================================ */
-  const SFX_NAMES = ['squeak', 'happy', 'nom', 'boing', 'splash', 'sparkle', 'levelup', 'sleepy', 'no', 'wake']
-  const sfxPool = new Map()
-  let sfxVerified = false
-
-  function initSfx () {
-    for (const n of SFX_NAMES) {
-      const a = new Audio(`pet://local/sfx/${n}.mp3`)
-      a.preload = 'auto'
-      // 仓库里默认是下载 + ffmpeg 处理过的 mp3。
-      // 如果你更想用纯合成的版本（tools/make-sfx.js 生成的是 wav），
-      // 把 mp3 删掉即可 —— 这里会自动退回 wav。
-      a.addEventListener('error', () => {
-        if (!/\.wav$/.test(a.src)) a.src = `pet://local/sfx/${n}.wav`
-      }, { once: true })
-      sfxPool.set(n, a)
-    }
-    api.log(`音效已装载 ${SFX_NAMES.length} 个`)
-  }
-
-  function playSfx (name, gain = 1, force = false) {
-    if ((!settings.sfx && !force) || !name) return
-    const base = sfxPool.get(name)
-    if (!base) { api.log('未知音效: ' + name); return }
-    try {
-      const a = base.cloneNode()
-      const vol = settings.sfxVolume == null ? 0.6 : settings.sfxVolume
-      a.volume = Math.max(0, Math.min(1, vol * gain))
-      const p = a.play()
-      if (p && p.then) {
-        p.then(() => {
-          // play() 只有真的开始播才会 resolve，这行足以证明音频通路是通的
-          if (!sfxVerified) { sfxVerified = true; api.log(`音效播放成功（首个：${name}，音量 ${a.volume.toFixed(2)}）`) }
-        }).catch((e) => api.log(`音效播放失败 ${name}: ${e.message}`))
-      }
-    } catch (e) {
-      api.log('音效异常: ' + e.message)
-    }
-  }
-
-  /* ============================================================ *
    * 指针交互
    * ============================================================ */
   function bindPointer () {
@@ -1184,7 +1134,6 @@
 
   function reactToClick () {
     addExpression('脸红', 'event', 2000)
-    playSfx('squeak', 0.9)
     if (Math.random() < 0.45) showBubble(PET_LINES[Math.floor(Math.random() * PET_LINES.length)])
   }
 
@@ -1312,7 +1261,7 @@
       }
     })
 
-    /* 主进程推来的表现指令（聊天回复、归位、音效…） */
+    /* 主进程推来的表现指令（聊天回复、归位…） */
     api.onEvents((events) => {
       for (const ev of events || []) {
         switch (ev.type) {
@@ -1325,27 +1274,20 @@
           case 'motion':
             playMotion(ev.target)
             break
-          case 'sound':
-            playSfx(ev.name, ev.gain || 1)
-            break
           default:
             break
         }
       }
     })
 
-    /* 输入联动：当前反应 → 反应层表情 + 台词 + 音效 */
+    /* 输入联动：当前反应 → 反应层表情 + 台词 */
     api.onReact((r) => {
       if (!r) return
       currentReact = r
       syncReactLayer(r.expressions)
-      // 这两行原来漏了 —— 载荷里明明带着 bubble / sfx，渲染层却没接，
-      // 结果犯困、你回来啦、被带嗨这几个音效和台词全都不出声。
-      if (r.bubble) showBubble(r.bubble, 3000)
-      if (r.sfx) playSfx(r.sfx)
-      if (r.bubble || r.sfx) {
-        api.log(`反应表现 -> ${r.sfx ? '音效 ' + r.sfx : ''}${r.sfx && r.bubble ? ' + ' : ''}` +
-          `${r.bubble ? '台词「' + r.bubble + '」' : ''}`)
+      if (r.bubble) {
+        showBubble(r.bubble, 3000)
+        api.log(`反应表现 -> 台词「${r.bubble}」`)
       }
     })
 
@@ -1407,17 +1349,6 @@
       settings.hud = !!on
       if (!on) hud.classList.add('hidden')
     })
-
-    api.onSfxSetting((s) => {
-      if (!s) return
-      const wasOn = settings.sfx
-      settings.sfx = !!s.enabled
-      settings.sfxVolume = s.volume
-      // 从关到开时给个即时反馈
-      if (settings.sfx && !wasOn) playSfx('squeak', 0.8)
-    })
-
-    api.onSfxTest(() => playSfx('sparkle', 1, true))
 
     /* 调试抓图：见上面 capturePet */
     api.onShot((spec) => { runShotScript(spec) })

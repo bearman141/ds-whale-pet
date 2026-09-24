@@ -23,7 +23,7 @@
   if (!box) return
 
   // 和主进程 settingsView() 的键一一对应
-  const TOGGLES = ['alwaysOnTop', 'clickThrough', 'inputReact', 'hotkeys', 'bubble', 'hud', 'sfx', 'autoLaunch']
+  const TOGGLES = ['alwaysOnTop', 'clickThrough', 'inputReact', 'hotkeys', 'bubble', 'hud', 'autoLaunch']
 
   let visible = false
   let posTimer = null
@@ -60,10 +60,6 @@
       const el = $('s-' + k)
       if (el) el.checked = !!s[k]
     }
-    const vol = Math.round((s.sfxVolume == null ? 0.6 : s.sfxVolume) * 100)
-    const slider = $('s-volume')
-    if (slider) slider.value = String(vol)
-    $('s-volume-val').textContent = String(vol)
     applying = false
   }
 
@@ -87,14 +83,6 @@
     })
   }
 
-  // 拖动时只更新数字，松手才真正写回去 —— 免得一路拖一路存盘
-  const slider = $('s-volume')
-  slider.addEventListener('input', () => { $('s-volume-val').textContent = slider.value })
-  slider.addEventListener('change', () => {
-    if (!applying) api.settingsSet('sfxVolume', Number(slider.value) / 100)
-  })
-
-  $('s-sfx-test').addEventListener('click', () => api.settingsDo('sfx-test'))
   $('s-reset-pos').addEventListener('click', () => api.settingsDo('reset-position'))
   $('s-reset').addEventListener('click', () => api.settingsDo('reset'))
   $('s-readme').addEventListener('click', () => api.settingsDo('open-readme'))
