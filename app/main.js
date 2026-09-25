@@ -213,6 +213,13 @@ function createWindow () {
     maximizable: false,
     fullscreenable: false,
     skipTaskbar: true,
+    // type:'toolbar' 是这里的关键。Electron 的 skipTaskbar 在 Windows 上走的是
+    // ITaskbarList::DeleteTab，只把按钮摘掉、并不设 WS_EX_TOOLWINDOW，
+    // 而窗口 showInactive() 之后系统又会把按钮加回来 —— 于是任务栏里一直有它。
+    // type:'toolbar' 会让 Windows 真的给窗口带上 WS_EX_TOOLWINDOW，
+    // 既不会出现在任务栏，也不会出现在 Alt+Tab 里。
+    // 用 tools/taskbar-probe.ps1 可以核对扩展样式（认 TOOLWINDOW 这一位）。
+    type: 'toolbar',
     hasShadow: false,
     focusable: has('focusable'),
     alwaysOnTop: settings.alwaysOnTop,

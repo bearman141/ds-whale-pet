@@ -468,6 +468,10 @@ Cubism 运行时只读 `model3.json`，所以 `make-model3.js` 会把 44 个表�
   `SetCursorPos` 不产生 Electron `forward` 依赖的那种底层鼠标事件
 - `inputcheck.ps1` —— 注入端自检：当前进程到底能不能合成键鼠输入。
   我这台开发机就是直接拒绝 `SetCursorPos` 的，这时候"桌宠没反应"跟桌宠一点关系都没有
+- `taskbar-probe.ps1` —— 列出桌宠窗口的扩展样式，用来确认它会不会出现在任务栏 / Alt+Tab。
+  任务栏只看 `WS_EX_TOOLWINDOW` 这一位。**Electron 的 `skipTaskbar` 在 Windows 上
+  只调 `ITaskbarList::DeleteTab`、并不设这一位**，所以窗口 `showInactive()` 之后
+  按钮又回来了；得靠 `type: 'toolbar'` 才真的带上（main.js 里有注释）
 - `mock-llm.js [port]` —— 假的 OpenAI 兼容服务，不用真 key 就能端到端测聊天链路
 
 ---
