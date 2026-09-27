@@ -14,6 +14,9 @@
   const sub = $('c-sub')
   const setup = $('c-setup')
   const main = $('c-main')
+  const persona = $('c-persona')
+  const personaText = $('c-persona-text')
+  const personaMsg = $('c-persona-msg')
   const msgsEl = $('c-msgs')
   const thinkingEl = $('c-thinking')
   const inputEl = $('c-text')
@@ -64,11 +67,19 @@
     $('c-key-hint').textContent = cfg.hasKey ? `　当前：${cfg.keyMask}` : ''
   }
 
-  function applyConfig (next) {
+  /** 三个视图只能看见一个：接口设置 / 聊天 / 人设 */
+  function showView (name) {
+    setup.classList.toggle('hidden', name !== 'setup')
+    main.classList.toggle('hidden', name !== 'main')
+    persona.classList.toggle('hidden', name !== 'persona')
+    window.PetView && window.PetView.relayout()
+  }
+
+  function applyConfig (next, opts = {}) {
     cfg = next
     fillForm()
-    setup.classList.toggle('hidden', !!cfg.ready)
-    main.classList.toggle('hidden', !cfg.ready)
+    // keepView：写人设时不要把用户从人设页踹回聊天页
+    if (!opts.keepView) showView(cfg.ready ? 'main' : 'setup')
     sub.textContent = cfg.ready
       ? `${cfg.model}${cfg.hasKey ? '' : '（无密钥）'}`
       : '未配置接口'
@@ -80,7 +91,8 @@
 
   /** 把当前可见的可点控件坐标写进日志，排查「点不到 / 打不了字」用 */
   function logGeometry () {
-    const ids = ['c-text', 'c-send', 'c-base', 'c-model', 'c-key', 'c-extra', 'c-save', 'c-test']
+    const ids = ['c-text', 'c-send', 'c-base', 'c-model', 'c-key', 'c-extra', 'c-save', 'c-test',
+      'c-persona-text', 'c-persona-save', 'c-persona-back']
     const parts = []
     for (const id of ids) {
       const el = $(id)
@@ -140,6 +152,52 @@
       say(setupMsg, '测试失败：' + (e && e.message ? e.message : e), 'err')
     } finally {
       $('c-test').disabled = false
+    }
+  }
+
+  /* ------------------------------------------------------------ *
+   * 人设
+   *
+   * 存的就是配置里的 systemExtra，主进程会把它原样追加到系统提示词末尾。
+   * 这里单独开一页，是因为它原来只是「接口设置」表单里的一个叫
+   * 「补充人设（可选）」的小输入框 —— 没人找得到。
+   * ------------------------------------------------------------ */
+  const PERSONA_MAX = 800      // 和 app/chat.js 里 normalizeConfig 的上限一致
+
+  function openPersona () {
+    personaText.value = (cfg && cfg.systemExtra) || ''
+    updatePersonaCount()
+    say(personaMsg, '')
+    showView('persona')
+    personaText.focus()
+  }
+
+  function updatePersonaCount () {
+    const n = personaText.value.length
+    const over = n > PERSONA_MAX
+    $('c-persona-count').textContent = `${n} / ${PERSONA_MAX}`
+    $('c-persona-count').classList.toggle('over', over)
+  }
+
+  async function doSavePersona () {
+    const text = personaText.value.trim()
+    if (text.length > PERSONA_MAX) {
+      say(personaMsg, `太长了，最多 ${PERSONA_MAX} 字（现在 ${text.length}）`, 'err')
+      return
+    }
+    $('c-persona-save').disabled = true
+    say(personaMsg, '保存中…')
+    try {
+      // 只传 systemExtra：主进程是合并式的，密钥和接口地址不会被碰
+      const next = await api.chatSaveConfig({ systemExtra: text })
+      cfg = next
+      fillForm()          // 让「接口设置」里那个同名字段跟上
+      say(personaMsg, '已保存，下一句就生效', 'ok')
+      api.log(`人设已保存（${text.length} 字）`)
+    } catch (e) {
+      say(personaMsg, '保存失败：' + (e && e.message ? e.message : e), 'err')
+    } finally {
+      $('c-persona-save').disabled = false
     }
   }
 
@@ -276,6 +334,10 @@
   $('c-save').addEventListener('click', doSave)
   $('c-test').addEventListener('click', doTest)
   $('c-clear').addEventListener('click', () => api.chatClear())
+  $('c-persona-btn').addEventListener('click', openPersona)
+  $('c-persona-back').addEventListener('click', () => showView('main'))
+  $('c-persona-save').addEventListener('click', doSavePersona)
+  $('c-persona-text').addEventListener('input', updatePersonaCount)
   $('c-settings').addEventListener('click', () => {
     applyConfig({ ...(cfg || {}), ready: false })
   })
@@ -315,7 +377,7 @@
   }
 
   wireInput(inputEl)
-  for (const id of ['c-base', 'c-model', 'c-key', 'c-extra']) wireInput($(id))
+  for (const id of ['c-base', 'c-model', 'c-key', 'c-extra', 'c-persona-text']) wireInput($(id))
 
   /* ------------------------------------------------------------ *
    * 初始化

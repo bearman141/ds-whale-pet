@@ -822,20 +822,32 @@ function startFakeKeys () {
 }
 
 /**
- * 整页抓图（DSHPET_PAGESHOT=settings|chat）
+ * 整页抓图（DSHPET_PAGESHOT=settings|chat|persona）
  *
  * 和 DSHPET_SHOT 的区别：那个走渲染层的 gl.readPixels，只能拍到 WebGL 里的模型，
  * 拍不到 HTML 面板。这个走 webContents.capturePage()，DOM 和 canvas 一起拍，
  * 用来检查面板排版有没有崩、控件有没有跑出卡片。
+ *
+ * persona 是「把聊天面板打开、再点一下『🎭 人设』」——
+ * 那个视图只能靠点击进去，抓图通道得自己点。
  */
 function startPageShot () {
   const which = process.env.DSHPET_PAGESHOT
-  if (which !== 'chat' && which !== 'settings') return
+  if (!['chat', 'settings', 'persona'].includes(which)) return
   shotDir = process.env.DSHPET_SHOT_DIR || path.join(__dirname, '..', 'shots')
   try { fs.mkdirSync(shotDir, { recursive: true }) } catch { /* ignore */ }
   setTimeout(() => {
     if (!win || win.isDestroyed()) return
-    win.webContents.send(which === 'chat' ? 'pet:chatpanel' : 'pet:settings-panel', { toggle: true })
+    win.webContents.send(which === 'settings' ? 'pet:settings-panel' : 'pet:chatpanel', { toggle: true })
+
+    if (which === 'persona') {
+      setTimeout(() => {
+        if (!win || win.isDestroyed()) return
+        win.webContents.executeJavaScript("document.getElementById('c-persona-btn').click()")
+          .catch((e) => log('[shot] 点「人设」失败:', e.message))
+      }, 700)
+    }
+
     setTimeout(async () => {
       try {
         const img = await win.webContents.capturePage()
@@ -844,7 +856,7 @@ function startPageShot () {
       } catch (e) {
         log('[shot] capturePage 失败:', e.message)
       }
-    }, 1500)
+    }, 2200)
   }, 5000)
 }
 

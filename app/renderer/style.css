@@ -146,7 +146,10 @@ html, body {
 .card.hidden { display: none; }
 
 #panel { width: 296px; }
-#chat { width: 330px; }
+/* 聊天面板比别的卡片大一圈：它得放下几轮对话和一个能写好几行的输入框。
+   以前是 330px 宽、消息区最小才 60px —— 只看得见一条消息，输入框还被压成一行，
+   用户的原话是「怎么扁扁的，太小了」。 */
+#chat { width: 430px; }
 #settings { width: 302px; }
 
 /* ================= 其他设置（三级窗口） ================= */
@@ -228,7 +231,7 @@ html, body {
 /* ================= 聊天面板 ================= */
 .c-title { font-size: 14px; font-weight: 700; color: #17405f; }
 
-#c-main.hidden, .c-thinking.hidden, #c-setup.hidden { display: none; }
+#c-main.hidden, .c-thinking.hidden, #c-setup.hidden, #c-persona.hidden { display: none; }
 
 /* ---- 首次配置 ---- */
 #c-setup { display: flex; flex-direction: column; gap: 7px; margin-top: 9px; }
@@ -294,8 +297,9 @@ html, body {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 266px;
-  min-height: 60px;
+  /* 消息区给足高度：以前 min 60px 只放得下一条就到底了 */
+  max-height: 380px;
+  min-height: 210px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -362,13 +366,15 @@ html, body {
   flex: 1;
   box-sizing: border-box;
   resize: none;
-  min-height: 30px;
-  max-height: 76px;
+  /* 输入框也给足：以前 30px 单行 + 滚动条，写长一点就看不见自己写了什么 */
+  min-height: 46px;
+  max-height: 128px;
+  line-height: 1.5;
   border: 1px solid rgba(120, 190, 235, 0.7);
   border-radius: 9px;
-  padding: 6px 8px;
+  padding: 7px 9px;
   font: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
   color: #22374d;
   background: #fff;
   outline: none;
@@ -392,3 +398,18 @@ html, body {
 
 .c-foot { display: flex; gap: 6px; margin-top: 7px; }
 .c-foot button { padding: 3px 8px; font-size: 11px; }
+
+/* ---- 人设 ---- */
+#c-persona { display: flex; flex-direction: column; margin-top: 9px; }
+
+/* 字段标题 + 字数计数左右分开。.c-field 是纵向 flex，
+   直接塞一个 span 进去会另起一行，所以外面再包一层。 */
+.c-field-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+#c-persona-count.over { color: #d9534f; font-weight: 600; }
+
+/* 人设是要认真写点东西的地方，别像输入框那样只有两行 */
+#c-persona-text {
+  min-height: 232px;
+  line-height: 1.65;
+  resize: vertical;
+}

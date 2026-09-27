@@ -54,7 +54,7 @@
         <label class="c-field">API Key<span id="c-key-hint" class="c-dim"></span>
           <input id="c-key" type="password" spellcheck="false" autocomplete="off" placeholder="sk-...">
         </label>
-        <label class="c-field">补充人设（可选）
+        <label class="c-field">人设 / 说话风格（可选）
           <textarea id="c-extra" rows="2" spellcheck="false" placeholder="例如：说话再随便一点，多用颜文字"></textarea>
         </label>
         <div class="c-row">
@@ -78,9 +78,29 @@
         </div>
         <div class="c-foot">
           <button id="c-clear">清空对话</button>
+          <button id="c-persona-btn">🎭 人设</button>
           <button id="c-settings">接口设置</button>
         </div>
         <div class="c-msg" id="c-msg"></div>
+      </div>
+
+      <!-- 人设（从主视图的「🎭 人设」进来） -->
+      <div id="c-persona" class="hidden">
+        <label class="c-field">
+          <span class="c-field-head">你想让她怎么说话<span id="c-persona-count" class="c-dim"></span></span>
+          <textarea id="c-persona-text" rows="9" spellcheck="false"
+            placeholder="一行写一条，比如：&#10;· 说话再随便一点，别那么客气&#10;· 叫我「老板」&#10;· 可以损我两句&#10;· 我写代码的时候别一直问我在干嘛"></textarea>
+        </label>
+        <div class="c-row">
+          <button id="c-persona-save" class="primary">保存人设</button>
+          <button id="c-persona-back">返回聊天</button>
+        </div>
+        <div class="c-msg" id="c-persona-msg"></div>
+        <div class="c-dim c-tip">
+          这段会<strong>原样追加</strong>到系统提示词的末尾。她本身已经有性格、说话规矩和输出格式了，
+          这里适合写「你想让她怎么称呼你」「你自己的情况」「想让她改掉的毛病」这种
+          只有你知道的设定。最多 800 字。
+        </div>
       </div>
     </div>
 
