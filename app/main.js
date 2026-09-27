@@ -305,8 +305,13 @@ let cursorTimer = null
  *   1. 切成「可交互」后转发彻底停止，指针坐标冻在进入那一刻，
  *      渲染进程再也发现不了你已经离开面板（窗口会卡在可交互状态）
  *   2. 视线跟随拿不到新坐标 —— 眼睛就不跟鼠标了
- * 所以干脆全程 50ms 轮询兜底，mousemove 只算锦上添花。
+ * 所以干脆全程轮询兜底，mousemove 只算锦上添花。
  * `screen.getCursorScreenPoint()` 不受窗口状态影响，返回的也是 DIP（= CSS px）。
+ *
+ * 间隔从 50ms 收到 25ms：这个轮询是渲染进程**唯一**可靠的光标来源，
+ * 命中判定（可不可交互）和拖拽都吃它。50ms 的滞后意味着
+ * 「鼠标刚移上去就按下」那一下常常来不及把窗口切成可交互，
+ * 结果按键被系统吃掉 —— 用户感觉就是「有时候拖不动」。
  */
 function startCursorPoll () {
   if (cursorTimer || !win || win.isDestroyed()) return
@@ -316,8 +321,8 @@ function startCursorPoll () {
       const p = screen.getCursorScreenPoint()
       win.webContents.send('pet:cursor', { x: p.x, y: p.y })
     } catch { /* ignore */ }
-  }, 50)
-  log('光标轮询已启动（50ms）')
+  }, 25)
+  log('光标轮询已启动（25ms）')
 }
 
 /* ------------------------------------------------------------------ *
@@ -492,8 +497,25 @@ function startUiohook () {
     if (rawLog) { rawCount.key++; log(`[raw] keydown #${rawCount.key}`) }
     if (input) { input.key(now); sendKeyPulse(now, keyTokenByCode.get(e.keycode)) }
   })
-  uIOhook.on('mousedown', () => {
-    if (rawLog) { rawCount.click++; log(`[raw] mousedown #${rawCount.click}`) }
+  uIOhook.on('mousedown', (e) => {
+    if (rawLog) { rawCount.click++; log(`[raw] mousedown #${rawCount.click} button=${e.button}`) }
+    // 「有时候拖不动」的定点诊断。
+    //
+    // 全局钩子看得到**每一次**左键按下，而窗口在「按像素穿透」状态下根本收不到
+    // mousedown —— 那一瞬间的点击被系统直接送给下面的窗口。
+    // 所以只要出现「按在宠物身上、但窗口正在穿透」，就一定是这个原因，
+    // 而且它只在出问题的时候才打日志，不会刷屏。
+    if (e.button === 1 && !interactive) {
+      try {
+        const p = screen.getCursorScreenPoint()
+        const h = settings.height || SIZE_PRESETS[settings.size] || 280
+        const halfW = h * 0.62
+        if (p.x > settings.x - halfW && p.x < settings.x + halfW &&
+            p.y > settings.y - h * 1.18 && p.y < settings.y + 10) {
+          log('⚠️ 左键按在宠物范围内，但窗口正在穿透 —— 这一下被系统吃掉了（拖不动就是这个）')
+        }
+      } catch { /* ignore */ }
+    }
     if (input) input.click(Date.now())
   })
   uIOhook.on('wheel', () => {

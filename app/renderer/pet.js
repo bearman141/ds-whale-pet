@@ -583,6 +583,11 @@
     }
   }
 
+  /**
+   * 某一个**精确**像素的 alpha。
+   * 启动自检用它来确认「模型到底画出来没有」，所以不能填缝 ——
+   * 要的就是「这个点是不是真的不透明」这一个事实。
+   */
   function alphaAt (x, y) {
     const gl = app.renderer.gl
     if (!gl || !gl.readPixels) return 255
@@ -592,6 +597,47 @@
     if (px < 0 || py < 0 || px >= gl.drawingBufferWidth || py >= gl.drawingBufferHeight) return 0
     gl.readPixels(px, py, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel)
     return pixel[3]
+  }
+
+  // 命中判定的探测半径（设备像素）。见 alphaNear 的说明。
+  const HIT_PROBE = 4
+  const hitBuf = new Uint8Array((HIT_PROBE * 2 + 1) * (HIT_PROBE * 2 + 1) * 4)
+
+  /**
+   * 光标附近一小片区域里的最大 alpha。
+   *
+   * 为什么要取一片而不是一个像素：模型是**活的** —— Idle 动作、呼吸、头发物理
+   * 每帧都在动，发丝之间、身体和尾巴之间还有薄薄的透明缝。只判一个像素的话，
+   * 恰好点在缝里，整窗就切成穿透，那一下 mousedown 直接被系统吃掉，
+   * 用户的感觉就是「有时候怎么都拖不动，过一会儿又好了」。
+   *
+   * 取一小片的最大值就把缝填上了；而离模型远的真正空白依然是 0，
+   * 「点别处不挡」这个前提没有破坏。
+   */
+  function alphaNear (x, y) {
+    const gl = app.renderer.gl
+    if (!gl || !gl.readPixels) return 255
+    const res = app.renderer.resolution
+    const size = HIT_PROBE * 2 + 1
+    const px = Math.floor(x * res) - HIT_PROBE
+    const py = Math.floor(gl.drawingBufferHeight - y * res) - HIT_PROBE
+    if (px >= gl.drawingBufferWidth || py >= gl.drawingBufferHeight ||
+        px + size <= 0 || py + size <= 0) return 0
+
+    // 贴边时把读取区域裁进缓冲区，越界部分当 0
+    const x0 = Math.max(0, px)
+    const y0 = Math.max(0, py)
+    const x1 = Math.min(gl.drawingBufferWidth, px + size)
+    const y1 = Math.min(gl.drawingBufferHeight, py + size)
+    const w = x1 - x0
+    const h = y1 - y0
+    if (w <= 0 || h <= 0) return 0
+
+    const buf = (w === size && h === size) ? hitBuf : new Uint8Array(w * h * 4)
+    gl.readPixels(x0, y0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf)
+    let max = 0
+    for (let i = 3; i < buf.length; i += 4) if (buf[i] > max) max = buf[i]
+    return max
   }
 
   function updateInteractive () {
@@ -607,7 +653,7 @@
     if (p.x < b.left || p.x > b.right || p.y < b.top || p.y > b.bottom) {
       return setInteractive(false, '离开宠物与面板')
     }
-    const hit = alphaAt(p.x, p.y) > ALPHA_HIT_THRESHOLD
+    const hit = alphaNear(p.x, p.y) > ALPHA_HIT_THRESHOLD
     setInteractive(hit, hit ? '模型像素' : '模型透明处')
   }
 
@@ -1049,17 +1095,29 @@
   /* ============================================================ *
    * 指针交互
    * ============================================================ */
+  /**
+   * 把宠物挪到「光标 - 抓取偏移」。
+   *
+   * DOM 的 mousemove 和主进程的光标轮询都走这里 —— 两条路都喂。
+   * 只靠 DOM mousemove 是不牢的：Electron 的 mousemove 转发本来就时有时无
+   * （main.js 里有实测记录），一旦断开，拖拽就变成「按着不动」。
+   */
+  function dragTo (cx, cy) {
+    const nx = cx - dragOffset.x
+    const ny = cy - dragOffset.y
+    if (nx === petX && ny === petY) return
+    dragMoved += Math.abs(nx - petX) + Math.abs(ny - petY)
+    petX = nx
+    petY = ny
+    layout()
+  }
+
   function bindPointer () {
     window.addEventListener('mousemove', (e) => {
       pointer.x = e.clientX
       pointer.y = e.clientY
       if (dragging) {
-        const nx = e.clientX - dragOffset.x
-        const ny = e.clientY - dragOffset.y
-        dragMoved += Math.abs(nx - petX) + Math.abs(ny - petY)
-        petX = nx
-        petY = ny
-        layout()
+        dragTo(e.clientX, e.clientY)
       } else {
         needHitTest = true
       }
@@ -1319,11 +1377,13 @@
       layout()
     })
 
-    /* 可交互期间 mousemove 不再转发，靠主进程轮询喂光标位置 */
+    /* 可交互期间 mousemove 不再转发，靠主进程轮询喂光标位置。
+       拖拽期间也要用这条坐标 —— 见 dragTo 的说明。 */
     api.onCursor((p) => {
       if (!p || typeof p.x !== 'number') return
       pointer.x = p.x
       pointer.y = p.y
+      if (dragging) dragTo(p.x, p.y)
       needHitTest = true
     })
 
